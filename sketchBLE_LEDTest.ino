@@ -54,8 +54,7 @@ uint8_t visualizerSettings[] = {
 
 // Temp data
 float audioData[NUM_AUDIO_POINTS] = { 0.0f };
-float audioFrameTime = 0.0f;
-int audioLastTime = 0;
+bool audioDecay[NUM_AUDIO_POINTS] = { false };
 
 // GRB format
 uint8_t *buffer;
@@ -263,25 +262,14 @@ void VisualizerSettingsChanged(BLEDevice device, BLECharacteristic characteristi
 
 void AudioDataChanged(BLEDevice device, BLECharacteristic characteristic) {
 	const uint8_t *value = characteristic.value();
-
-	int currentTime = millis();
-	audioFrameTime = (currentTime - audioLastTime) / 1000.0f;
-	audioLastTime = currentTime;
-
-	if (audioFrameTime >= 1.0f) {
-		audioFrameTime = 0.999f;
-	}
-
 	for (int i = 0; i < characteristic.valueLength(); ++i) {
 		float nValue = value[i] / 255.0f;
 		if (nValue >= audioData[i]) {
 			audioData[i] = nValue;
+			audioDecay[i] = false;
 		}
 		else {
-			audioData[i] -= audioFrameTime * visualizerSettings[1] / 10.0f;
-			if (audioData[i] < 0.0f) {
-				audioData[i] = 0.0f;
-			}
+			audioDecay[i] = true;
 		}
 	}
 }
@@ -489,6 +477,15 @@ void AnimateVisualizer() {
 		buffer[i * 3] = brightness;
 		buffer[i * 3 + 1] = brightness;
 		buffer[i * 3 + 2] = brightness;
+	}
+
+	for (int i = 0; i < NUM_LEDS; ++i) {
+		if (audioDecay[i]) {
+			audioData[i] -= frameTime * visualizerSettings[1] / 10.0f;
+			if (audioData[i] < 0.0f) {
+				audioData[i] = 0.0f;
+			}
+		}
 	}
 
 	pixels.show();
