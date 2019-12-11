@@ -52,6 +52,17 @@ uint8_t visualizerSettings[] = {
 	255, // Decay
 };
 
+uint8_t visorSettings[] = {
+	0xFF, 0, 0, // Color 1
+	0, 0xFF, 0, // Color 2
+	1, // Number colors
+	10, // Speed
+	0, // Fade in
+	1, // Fade out
+	0, // Rainbow cycle
+	10, // Rainbow cycle speed
+};
+
 // Temp data
 float audioData[NUM_AUDIO_POINTS] = { 0.0f };
 bool audioDecay[NUM_AUDIO_POINTS] = { false };
@@ -66,6 +77,9 @@ BLECharacteristic blinkSettingsCharacteristic("e8942ca1-d9e7-4c45-b96c-10cf850bf
 BLECharacteristic waveSettingsCharacteristic("e8942ca1-d9e7-4c45-b96c-10cf850bfa02", BLERead | BLEWrite, sizeof waveSettings);
 BLECharacteristic colorWheelSettingsCharacteristic("e8942ca1-d9e7-4c45-b96c-10cf850bfa03", BLERead | BLEWrite, sizeof colorWheelSettings);
 BLECharacteristic visualizerSettingsCharacteristic("e8942ca1-d9e7-4c45-b96c-10cf850bfa04", BLERead | BLEWrite, sizeof visualizerSettings);
+BLECharacteristic visorSettingsCharacteristic("e8942ca1-d9e7-4c45-b96c-10cf850bfa05", BLERead | BLEWrite, sizeof visorSettings);
+
+// Upstream BLE
 BLECharacteristic audioDataCharacteristic("e8942ca1-d9e7-4c45-b96c-20cf850bfa00", BLEWrite, sizeof audioData);
 
 // EEP
@@ -103,6 +117,7 @@ void setup() {
 		eep.write(EEP_ROM_PAGE_SIZE * 2, (byte*)&waveSettings, sizeof waveSettings);
 		eep.write(EEP_ROM_PAGE_SIZE * 3, (byte*)&colorWheelSettings, sizeof colorWheelSettings);
 		eep.write(EEP_ROM_PAGE_SIZE * 4, (byte*)&visualizerSettings, sizeof visualizerSettings);
+		eep.write(EEP_ROM_PAGE_SIZE * 5, (byte*)&visorSettings, sizeof visorSettings);
 #endif
 
 #if EEP_LOAD == 1
@@ -111,6 +126,7 @@ void setup() {
 		eep.read(EEP_ROM_PAGE_SIZE * 2, (byte*)&waveSettings, sizeof waveSettings);
 		eep.read(EEP_ROM_PAGE_SIZE * 3, (byte*)&colorWheelSettings, sizeof colorWheelSettings);
 		eep.read(EEP_ROM_PAGE_SIZE * 4, (byte*)&visualizerSettings, sizeof visualizerSettings);
+		eep.read(EEP_ROM_PAGE_SIZE * 5, (byte*)&visorSettings, sizeof visorSettings);
 
 		bleCurrentUpdateDelay = (selectedEffect == 3) ? BLE_DELAY_VISUALIZER : BLE_DELAY;
 #endif
@@ -145,6 +161,7 @@ void setup() {
 	ledService.addCharacteristic(waveSettingsCharacteristic);
 	ledService.addCharacteristic(colorWheelSettingsCharacteristic);
 	ledService.addCharacteristic(visualizerSettingsCharacteristic);
+	ledService.addCharacteristic(visorSettingsCharacteristic);
 	ledService.addCharacteristic(audioDataCharacteristic);
 	BLE.addService(ledService);
 
@@ -154,6 +171,7 @@ void setup() {
 	waveSettingsCharacteristic.writeValue(waveSettings, sizeof waveSettings);
 	colorWheelSettingsCharacteristic.writeValue(colorWheelSettings, sizeof colorWheelSettings);
 	visualizerSettingsCharacteristic.writeValue(visualizerSettings, sizeof visualizerSettings);
+	visorSettingsCharacteristic.writeValue(visorSettings, sizeof visorSettings);
 
 	// Characteristics callbacks
 	effectTypeCharacteristic.setEventHandler(BLEWritten, EffectTypeChanged);
@@ -161,6 +179,7 @@ void setup() {
 	waveSettingsCharacteristic.setEventHandler(BLEWritten, WaveSettingsChanged);
 	colorWheelSettingsCharacteristic.setEventHandler(BLEWritten, ColorWheelSettingsChanged);
 	visualizerSettingsCharacteristic.setEventHandler(BLEWritten, VisualizerSettingsChanged);
+	visorSettingsCharacteristic.setEventHandler(BLEWritten, VisorSettingsChanged);
 	audioDataCharacteristic.setEventHandler(BLEWritten, AudioDataChanged);
 
 	// Advertise
@@ -260,6 +279,15 @@ void VisualizerSettingsChanged(BLEDevice device, BLECharacteristic characteristi
 #endif
 }
 
+void VisorSettingsChanged(BLEDevice device, BLECharacteristic characteristic) {
+	EffectSettingsChanged(visorSettings, characteristic);
+#if EEP_SAVE_CHANGES == 1
+	if (eepReady) {
+		eep.write(EEP_ROM_PAGE_SIZE * 5, visorSettings, sizeof visorSettings);
+	}
+#endif
+}
+
 void AudioDataChanged(BLEDevice device, BLECharacteristic characteristic) {
 	const uint8_t *value = characteristic.value();
 	for (int i = 0; i < characteristic.valueLength(); ++i) {
@@ -291,6 +319,10 @@ void Animate() {
 
 	case 3:
 		AnimateVisualizer();
+		break;
+
+	case 4:
+		AnimateVisor();
 		break;
 	}
 
@@ -486,6 +518,46 @@ void AnimateVisualizer() {
 				audioData[i] = 0.0f;
 			}
 		}
+	}
+
+	pixels.show();
+}
+
+// Visor FX
+float visorTimer = 0.0f;
+
+void AnimateVisor() {
+
+	visorTimer += frameTime * (visorSettings[7] / 10.0f);
+	while (visorTimer >= 1.0f) {
+		visorTimer -= 1.0f;
+	}
+
+	const bool fadeIn = visorSettings[8] != 0;
+	const bool fadeOut = visorSettings[9] != 0;
+
+	for (int i = 0; i < NUM_LEDS; ++i) {
+		float periodOffset = i / float(NUM_LEDS) * 0.5f;
+		float period = fmod(visorTimer + periodOffset, 1.0f);
+		float brightness;
+		if (fadeIn && fadeOut) {
+			brightness = period > 0.75f ? 1.0f - max(0.0f, (period - 0.75f) * 4.0f) :
+				period > 0.5f ? 1.0f - max(0.0f, (period - 0.5f) * 4.0f) :
+				0.0f;
+		}
+		else if (fadeIn) {
+			brightness = max(0.0f, (period - 0.5f) * 2.0f);
+		}
+		else if (fadeOut) {
+			brightness = period > 0.5f ? 1.0f - max(0.0f, (period - 0.5f) * 2.0f) : 0.0f;
+		}
+		else {
+			brightness = period > 0.5f ? 1.0f : 0.0f;
+		}
+
+		buffer[i * 3] = visorSettings[1] * brightness;
+		buffer[i * 3 + 1] = visorSettings[0] * brightness;
+		buffer[i * 3 + 2] = visorSettings[2] * brightness;
 	}
 
 	pixels.show();
