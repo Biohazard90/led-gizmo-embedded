@@ -12,7 +12,7 @@
 #define NUM_AUDIO_POINTS 5
 #define ANIMATION_DELAY int(1000/30) // FPS
 #define BLE_DELAY 0.25f
-#define BLE_DELAY_VISUALIZER 0.01f
+#define BLE_DELAY_VISUALIZER 0.025f
 #define EEP_ROM_PAGE_SIZE 32
 
 Adafruit_NeoPixel pixels(NUM_LEDS, PIN, NEO_GRB + NEO_KHZ800);
@@ -28,6 +28,7 @@ uint8_t blinkSettings[] = {
 	0, // Rainbow cycle
 	10, // Rainbow cycle speed
 };
+uint8_t blinkSettingsDefaults[sizeof blinkSettings];
 
 uint8_t waveSettings[] = {
 	0xFF, 0, 0, // Color 1
@@ -40,17 +41,20 @@ uint8_t waveSettings[] = {
 	0, // Rainbow cycle
 	10, // Rainbow cycle speed
 };
+uint8_t waveSettingsDefaults[sizeof waveSettings];
 
 uint8_t colorWheelSettings[] = {
 	255, // Brightness
 	10, // Speed
 	10, // Width
 };
+uint8_t colorWheelSettingsDefaults[sizeof colorWheelSettings];
 
 uint8_t visualizerSettings[] = {
 	255, // Brightness
 	255, // Decay
 };
+uint8_t visualizerSettingsDefaults[sizeof visualizerSettings];
 
 uint8_t visorSettings[] = {
 	0xFF, 0, 0, // Color 1
@@ -62,25 +66,32 @@ uint8_t visorSettings[] = {
 	0, // Rainbow cycle
 	10, // Rainbow cycle speed
 };
+uint8_t visorSettingsDefaults[sizeof visorSettings];
 
 // Temp data
 float audioData[NUM_AUDIO_POINTS] = { 0.0f };
 bool audioDecay[NUM_AUDIO_POINTS] = { false };
 
+uint8_t functionCallState[] = {
+	0, // Reset call
+	0, // Reset FX index
+};
+
 // GRB format
 uint8_t *buffer;
 
 // BLE
-BLEService ledService("e8942ca1-eef7-4a95-afeb-e3d07e8af52e");
-BLEIntCharacteristic effectTypeCharacteristic("e8942ca1-d9e7-4c45-b96c-10cf850bfa00", BLERead | BLEWrite);
-BLECharacteristic blinkSettingsCharacteristic("e8942ca1-d9e7-4c45-b96c-10cf850bfa01", BLERead | BLEWrite, sizeof blinkSettings);
-BLECharacteristic waveSettingsCharacteristic("e8942ca1-d9e7-4c45-b96c-10cf850bfa02", BLERead | BLEWrite, sizeof waveSettings);
-BLECharacteristic colorWheelSettingsCharacteristic("e8942ca1-d9e7-4c45-b96c-10cf850bfa03", BLERead | BLEWrite, sizeof colorWheelSettings);
-BLECharacteristic visualizerSettingsCharacteristic("e8942ca1-d9e7-4c45-b96c-10cf850bfa04", BLERead | BLEWrite, sizeof visualizerSettings);
-BLECharacteristic visorSettingsCharacteristic("e8942ca1-d9e7-4c45-b96c-10cf850bfa05", BLERead | BLEWrite, sizeof visorSettings);
+BLEService ledService(PROGMEM "e8942ca1-eef7-4a95-afeb-e3d07e8af52e");
+BLEIntCharacteristic effectTypeCharacteristic(PROGMEM "e8942ca1-d9e7-4c45-b96c-10cf850bfa00", BLERead | BLEWrite);
+BLECharacteristic blinkSettingsCharacteristic(PROGMEM "e8942ca1-d9e7-4c45-b96c-10cf850bfa01", BLERead | BLEWrite, sizeof blinkSettings);
+BLECharacteristic waveSettingsCharacteristic(PROGMEM "e8942ca1-d9e7-4c45-b96c-10cf850bfa02", BLERead | BLEWrite, sizeof waveSettings);
+BLECharacteristic colorWheelSettingsCharacteristic(PROGMEM "e8942ca1-d9e7-4c45-b96c-10cf850bfa03", BLERead | BLEWrite, sizeof colorWheelSettings);
+BLECharacteristic visualizerSettingsCharacteristic(PROGMEM "e8942ca1-d9e7-4c45-b96c-10cf850bfa04", BLERead | BLEWrite, sizeof visualizerSettings);
+BLECharacteristic visorSettingsCharacteristic(PROGMEM "e8942ca1-d9e7-4c45-b96c-10cf850bfa05", BLERead | BLEWrite, sizeof visorSettings);
 
 // Upstream BLE
-BLECharacteristic audioDataCharacteristic("e8942ca1-d9e7-4c45-b96c-20cf850bfa00", BLEWrite, sizeof audioData);
+BLECharacteristic audioDataCharacteristic(PROGMEM "e8942ca1-d9e7-4c45-b96c-20cf850bfa00", BLEWrite, sizeof audioData);
+BLECharacteristic fnCallCharacteristic(PROGMEM "e8942ca1-d9e7-4c45-b96c-20cf850bfa01", BLEWrite, sizeof functionCallState);
 
 // EEP
 extEEPROM eep(kbits_256, 1, EEP_ROM_PAGE_SIZE);
@@ -90,6 +101,7 @@ bool eepReady = false;
 #define EEP_LOAD 1
 #define EEP_TEST 0
 #define EEP_SAVE_CHANGES 1
+#define VALIDATE_BLE_BUFFERS 1
 
 int lastTime = 0;
 int animationDelayCompensation = 0;
@@ -97,11 +109,19 @@ float frameTime = 0.0f;
 float bleUpdateTimer = 0;
 float bleCurrentUpdateDelay = BLE_DELAY;
 
+float connectionEffectTimer = 0.0f;
+
 BLEDevice central;
 
 void setup() {
-	//Serial.begin(115200);
+	Serial.begin(115200);
 	//Serial.setTimeout(50);
+
+	copySmall(blinkSettingsDefaults, blinkSettings, sizeof blinkSettingsDefaults);
+	copySmall(waveSettingsDefaults, waveSettings, sizeof waveSettingsDefaults);
+	copySmall(colorWheelSettingsDefaults, colorWheelSettings, sizeof colorWheelSettingsDefaults);
+	copySmall(visualizerSettingsDefaults, visualizerSettings, sizeof visualizerSettingsDefaults);
+	copySmall(visorSettingsDefaults, visorSettings, sizeof visorSettingsDefaults);
 
 	// LED init
 	pixels.begin();
@@ -153,7 +173,7 @@ void setup() {
 	// BLE init
 	//BLE.setConnectionInterval(0x0001, 0x0001);
 	BLE.begin();
-	BLE.setLocalName("Doggy Light");
+	BLE.setLocalName(PROGMEM "Doggy Light");
 
 	// Service setup
 	ledService.addCharacteristic(effectTypeCharacteristic);
@@ -163,6 +183,7 @@ void setup() {
 	ledService.addCharacteristic(visualizerSettingsCharacteristic);
 	ledService.addCharacteristic(visorSettingsCharacteristic);
 	ledService.addCharacteristic(audioDataCharacteristic);
+	ledService.addCharacteristic(fnCallCharacteristic);
 	BLE.addService(ledService);
 
 	// Characteristics init
@@ -172,6 +193,7 @@ void setup() {
 	colorWheelSettingsCharacteristic.writeValue(colorWheelSettings, sizeof colorWheelSettings);
 	visualizerSettingsCharacteristic.writeValue(visualizerSettings, sizeof visualizerSettings);
 	visorSettingsCharacteristic.writeValue(visorSettings, sizeof visorSettings);
+	fnCallCharacteristic.writeValue(functionCallState, sizeof functionCallState);
 
 	// Characteristics callbacks
 	effectTypeCharacteristic.setEventHandler(BLEWritten, EffectTypeChanged);
@@ -181,6 +203,7 @@ void setup() {
 	visualizerSettingsCharacteristic.setEventHandler(BLEWritten, VisualizerSettingsChanged);
 	visorSettingsCharacteristic.setEventHandler(BLEWritten, VisorSettingsChanged);
 	audioDataCharacteristic.setEventHandler(BLEWritten, AudioDataChanged);
+	fnCallCharacteristic.setEventHandler(BLEWritten, FnCallChanged);
 
 	// Advertise
 	BLE.setAdvertisedService(ledService);
@@ -224,6 +247,13 @@ void blePeripheralDisconnectedHandler(BLEDevice device) {
 	//Serial.println(device.address());
 }
 
+void copySmall(uint8_t *dst, uint8_t *src, int size) {
+	--size;
+	for (; size >= 0; --size) {
+		dst[size] = src[size];
+	}
+}
+
 void EffectTypeChanged(BLEDevice device, BLECharacteristic characteristic) {
 	selectedEffect = *(const int*)characteristic.value();
 
@@ -244,6 +274,12 @@ void EffectSettingsChanged(uint8_t *settings, BLECharacteristic characteristic) 
 }
 
 void BlinkSettingsChanged(BLEDevice device, BLECharacteristic characteristic) {
+#if VALIDATE_BLE_BUFFERS == 1
+	if (sizeof blinkSettings != characteristic.valueLength()) {
+		Serial.println("err blinkSettings");
+		return;
+	}
+#endif
 	EffectSettingsChanged(blinkSettings, characteristic);
 #if EEP_SAVE_CHANGES == 1
 	if (eepReady) {
@@ -253,6 +289,12 @@ void BlinkSettingsChanged(BLEDevice device, BLECharacteristic characteristic) {
 }
 
 void WaveSettingsChanged(BLEDevice device, BLECharacteristic characteristic) {
+#if VALIDATE_BLE_BUFFERS == 1
+	if (sizeof waveSettings != characteristic.valueLength()) {
+		Serial.println("err waveSettings");
+		return;
+	}
+#endif
 	EffectSettingsChanged(waveSettings, characteristic);
 #if EEP_SAVE_CHANGES == 1
 	if (eepReady) {
@@ -262,6 +304,12 @@ void WaveSettingsChanged(BLEDevice device, BLECharacteristic characteristic) {
 }
 
 void ColorWheelSettingsChanged(BLEDevice device, BLECharacteristic characteristic) {
+#if VALIDATE_BLE_BUFFERS == 1
+	if (sizeof colorWheelSettings != characteristic.valueLength()) {
+		Serial.println("err colorWheelSettings");
+		return;
+	}
+#endif
 	EffectSettingsChanged(colorWheelSettings, characteristic);
 #if EEP_SAVE_CHANGES == 1
 	if (eepReady) {
@@ -271,6 +319,12 @@ void ColorWheelSettingsChanged(BLEDevice device, BLECharacteristic characteristi
 }
 
 void VisualizerSettingsChanged(BLEDevice device, BLECharacteristic characteristic) {
+#if VALIDATE_BLE_BUFFERS == 1
+	if (sizeof visualizerSettings != characteristic.valueLength()) {
+		Serial.println("err visualizerSettings");
+		return;
+	}
+#endif
 	EffectSettingsChanged(visualizerSettings, characteristic);
 #if EEP_SAVE_CHANGES == 1
 	if (eepReady) {
@@ -280,6 +334,12 @@ void VisualizerSettingsChanged(BLEDevice device, BLECharacteristic characteristi
 }
 
 void VisorSettingsChanged(BLEDevice device, BLECharacteristic characteristic) {
+#if VALIDATE_BLE_BUFFERS == 1
+	if (sizeof visorSettings != characteristic.valueLength()) {
+		Serial.println("err visorSettings");
+		return;
+	}
+#endif
 	EffectSettingsChanged(visorSettings, characteristic);
 #if EEP_SAVE_CHANGES == 1
 	if (eepReady) {
@@ -289,8 +349,14 @@ void VisorSettingsChanged(BLEDevice device, BLECharacteristic characteristic) {
 }
 
 void AudioDataChanged(BLEDevice device, BLECharacteristic characteristic) {
+#if VALIDATE_BLE_BUFFERS == 1
+	if (NUM_AUDIO_POINTS != characteristic.valueLength()) {
+		Serial.println("err audioData");
+		return;
+	}
+#endif
 	const uint8_t *value = characteristic.value();
-	for (int i = 0; i < characteristic.valueLength(); ++i) {
+	for (int i = 0; i < NUM_AUDIO_POINTS; ++i) {
 		float nValue = value[i] / 255.0f;
 		if (nValue >= audioData[i]) {
 			audioData[i] = nValue;
@@ -302,7 +368,58 @@ void AudioDataChanged(BLEDevice device, BLECharacteristic characteristic) {
 	}
 }
 
+void FnCallChanged(BLEDevice device, BLECharacteristic characteristic) {
+#if VALIDATE_BLE_BUFFERS == 1
+	if (sizeof functionCallState != characteristic.valueLength()) {
+		Serial.println("err functionCallState");
+		return;
+	}
+#endif
+	const uint8_t *value = characteristic.value();
+	for (int i = 0; i < 1; ++i) {
+		if (functionCallState[i] != value[i]) {
+			functionCallState[i] = value[i];
+
+			// Call this function
+			switch (i) {
+			case 0:
+				ResetSettings(value[1]);
+				break;
+			}
+		}
+	}
+}
+
+void ResetSettings(uint8_t effect) {
+	switch (effect) {
+	case 0:
+		blinkSettingsCharacteristic.writeValue(blinkSettingsDefaults, sizeof blinkSettingsDefaults);
+		break;
+
+	case 1:
+		waveSettingsCharacteristic.writeValue(waveSettingsDefaults, sizeof waveSettingsDefaults);
+		break;
+
+	case 2:
+		colorWheelSettingsCharacteristic.writeValue(colorWheelSettingsDefaults, sizeof colorWheelSettingsDefaults);
+		break;
+
+	case 3:
+		visualizerSettingsCharacteristic.writeValue(visualizerSettingsDefaults, sizeof visualizerSettingsDefaults);
+		break;
+
+	case 4:
+		visorSettingsCharacteristic.writeValue(visorSettingsDefaults, sizeof visorSettingsDefaults);
+		break;
+	}
+}
+
 void Animate() {
+
+	if (connectionEffectTimer > 0.0f) {
+		ConnectionFX();
+		return;
+	}
 
 	switch (selectedEffect) {
 	case 0:
@@ -325,30 +442,6 @@ void Animate() {
 		AnimateVisor();
 		break;
 	}
-
-	//int val = brightness * 3 - 255 * 2;
-	//if (val < 0)
-	//	val = 0;
-	//buffer[0] = colG * val / 255.0f;
-	//buffer[1] = colR * val / 255.0f;
-	//buffer[2] = colB * val / 255.0f;
-	//for (int i = NUM_LEDS - 1; i > 0; --i) {
-	//	buffer[i * 3] = buffer[(i - 1) * 3];
-	//	buffer[i * 3 + 1] = buffer[(i - 1) * 3 + 1];
-	//	buffer[i * 3 + 2] = buffer[(i - 1) * 3 + 2];
-	//}
-	//pixels.show();
-	//brightness += d ? -20 : 20;
-	//if (brightness > 255)
-	//{
-	//	brightness = 255;
-	//	d = 1;
-	//}
-	//if (brightness < 0)
-	//{
-	//	brightness = 0;
-	//	d = 0;
-	//}
 }
 
 // Shared FX
@@ -502,8 +595,6 @@ void AnimateColorWheel() {
 // Audio vis FX
 void AnimateVisualizer() {
 
-	// audioData -> NUM_AUDIO_POINTS
-
 	for (int i = 0; i < NUM_LEDS; ++i) {
 		float brightness = visualizerSettings[0] * audioData[i];
 		buffer[i * 3] = brightness;
@@ -511,7 +602,7 @@ void AnimateVisualizer() {
 		buffer[i * 3 + 2] = brightness;
 	}
 
-	for (int i = 0; i < NUM_LEDS; ++i) {
+	for (int i = 0; i < NUM_AUDIO_POINTS; ++i) {
 		if (audioDecay[i]) {
 			audioData[i] -= frameTime * visualizerSettings[1] / 10.0f;
 			if (audioData[i] < 0.0f) {
@@ -536,13 +627,40 @@ void AnimateVisor() {
 	const bool fadeIn = visorSettings[8] != 0;
 	const bool fadeOut = visorSettings[9] != 0;
 
+	uint8_t *col1 = visorSettings;
+	uint8_t *col2 = visorSettings + 3;
+	uint8_t colRainbow[3];
+
+	if (visorSettings[6] == 1) {
+		col2 = col1;
+	}
+
+	const bool isRainbow = visorSettings[10] != 0;
+	if (isRainbow) {
+		col1 = colRainbow;
+		col2 = colRainbow;
+
+		const float rainbowSpeed = visorSettings[11];
+		rainbowCycleTimer += frameTime * rainbowSpeed * 2;
+		while (rainbowCycleTimer > 360.0f) {
+			rainbowCycleTimer -= 360.0f;
+		}
+		HSV2RGB(rainbowCycleTimer, 100, 100, colRainbow, colRainbow + 1, colRainbow + 2);
+	}
+
+	int colorDifferences[3] = {
+		col2[0] - col1[0],
+		col2[1] - col1[1],
+		col2[2] - col1[2]
+	};
+
 	for (int i = 0; i < NUM_LEDS; ++i) {
 		float periodOffset = i / float(NUM_LEDS) * 0.5f;
 		float period = fmod(visorTimer + periodOffset, 1.0f);
 		float brightness;
 		if (fadeIn && fadeOut) {
 			brightness = period > 0.75f ? 1.0f - max(0.0f, (period - 0.75f) * 4.0f) :
-				period > 0.5f ? 1.0f - max(0.0f, (period - 0.5f) * 4.0f) :
+				period > 0.5f ? max(0.0f, (period - 0.5f) * 4.0f) :
 				0.0f;
 		}
 		else if (fadeIn) {
@@ -555,9 +673,10 @@ void AnimateVisor() {
 			brightness = period > 0.5f ? 1.0f : 0.0f;
 		}
 
-		buffer[i * 3] = visorSettings[1] * brightness;
-		buffer[i * 3 + 1] = visorSettings[0] * brightness;
-		buffer[i * 3 + 2] = visorSettings[2] * brightness;
+		const float colorPeriod = max(0.0f, (period - 0.5f) * 2.0f);
+		buffer[i * 3] = (col1[1] + colorDifferences[1] * colorPeriod) * brightness;
+		buffer[i * 3 + 1] = (col1[0] + colorDifferences[0] * colorPeriod) * brightness;
+		buffer[i * 3 + 2] = (col1[2] + colorDifferences[2] * colorPeriod) * brightness;
 	}
 
 	pixels.show();
@@ -573,16 +692,34 @@ void UpdateBLE() {
 	BLE.poll();
 	if (!central || !central.connected())
 	{
-		//Serial.println("Connecting new central");
+		if (central) {
+			central.disconnect();
+		}
 		central = BLE.central();
+		if (central && central.connected()) {
+			connectionEffectTimer = 2.0f;
+		}
+	}
+}
+
+// Connection FX
+void ConnectionFX() {
+
+	connectionEffectTimer -= frameTime * 2.5f;
+	if (connectionEffectTimer < 0.0f) {
+		connectionEffectTimer = 0.0f;
 	}
 
-	//if (central) {  // if a central is connected to peripheral:
-	//	while (blinkSettingsCharacteristic.written()) {
-	//		const uint8_t *newValue = blinkSettingsCharacteristic.value();
-	//		colR = (ledCharacteristicValue & 0xFF);
-	//		colG = ((ledCharacteristicValue >> 8) & 0xFF);
-	//		colB = ((ledCharacteristicValue >> 16) & 0xFF);
-	//	}
-	//}
+	float brightness = cos(float(connectionEffectTimer * M_PI * 2 - M_PI)) * 0.5f + 0.5f;
+
+	buffer[0] = 32 * brightness;
+	buffer[1] = 0 * brightness;
+	buffer[2] = 96 * brightness;
+
+	for (int i = 1; i < NUM_LEDS; ++i) {
+		buffer[i * 3] = buffer[0];
+		buffer[i * 3 + 1] = buffer[1];
+		buffer[i * 3 + 2] = buffer[2];
+	}
+	pixels.show();
 }
