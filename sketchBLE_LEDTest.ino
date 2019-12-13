@@ -68,6 +68,21 @@ uint8_t visorSettings[] = {
 };
 uint8_t visorSettingsDefaults[sizeof visorSettings];
 
+uint8_t policeSettings[] = {
+	0, 0, 0xFF, // Color 1
+	0xFF, 0, 0, // Color 2
+	10, // Speed
+};
+uint8_t policeSettingsDefaults[sizeof policeSettings];
+
+uint8_t christmasSettings[] = {
+	0xFF, 0xFF, 0xFF, // Color 1
+	0xFF, 0, 0, // Color 2
+	0, 0xFF, 0, // Color 3
+	10, // Speed
+};
+uint8_t christmasSettingsDefaults[sizeof christmasSettings];
+
 // Temp data
 float audioData[NUM_AUDIO_POINTS] = { 0.0f };
 bool audioDecay[NUM_AUDIO_POINTS] = { false };
@@ -88,6 +103,8 @@ BLECharacteristic waveSettingsCharacteristic(PROGMEM "e8942ca1-d9e7-4c45-b96c-10
 BLECharacteristic colorWheelSettingsCharacteristic(PROGMEM "e8942ca1-d9e7-4c45-b96c-10cf850bfa03", BLERead | BLEWrite, sizeof colorWheelSettings);
 BLECharacteristic visualizerSettingsCharacteristic(PROGMEM "e8942ca1-d9e7-4c45-b96c-10cf850bfa04", BLERead | BLEWrite, sizeof visualizerSettings);
 BLECharacteristic visorSettingsCharacteristic(PROGMEM "e8942ca1-d9e7-4c45-b96c-10cf850bfa05", BLERead | BLEWrite, sizeof visorSettings);
+BLECharacteristic policeSettingsCharacteristic(PROGMEM "e8942ca1-d9e7-4c45-b96c-10cf850bfa06", BLERead | BLEWrite, sizeof policeSettings);
+BLECharacteristic christmasSettingsCharacteristic(PROGMEM "e8942ca1-d9e7-4c45-b96c-10cf850bfa07", BLERead | BLEWrite, sizeof christmasSettings);
 
 // Upstream BLE
 BLECharacteristic audioDataCharacteristic(PROGMEM "e8942ca1-d9e7-4c45-b96c-20cf850bfa00", BLEWrite, sizeof audioData);
@@ -122,6 +139,8 @@ void setup() {
 	copySmall(colorWheelSettingsDefaults, colorWheelSettings, sizeof colorWheelSettingsDefaults);
 	copySmall(visualizerSettingsDefaults, visualizerSettings, sizeof visualizerSettingsDefaults);
 	copySmall(visorSettingsDefaults, visorSettings, sizeof visorSettingsDefaults);
+	copySmall(policeSettingsDefaults, policeSettings, sizeof policeSettingsDefaults);
+	copySmall(christmasSettingsDefaults, christmasSettings, sizeof christmasSettingsDefaults);
 
 	// LED init
 	pixels.begin();
@@ -138,6 +157,8 @@ void setup() {
 		eep.write(EEP_ROM_PAGE_SIZE * 3, (byte*)&colorWheelSettings, sizeof colorWheelSettings);
 		eep.write(EEP_ROM_PAGE_SIZE * 4, (byte*)&visualizerSettings, sizeof visualizerSettings);
 		eep.write(EEP_ROM_PAGE_SIZE * 5, (byte*)&visorSettings, sizeof visorSettings);
+		eep.write(EEP_ROM_PAGE_SIZE * 6, (byte*)&policeSettings, sizeof policeSettings);
+		eep.write(EEP_ROM_PAGE_SIZE * 7, (byte*)&christmasSettings, sizeof christmasSettings);
 #endif
 
 #if EEP_LOAD == 1
@@ -147,6 +168,8 @@ void setup() {
 		eep.read(EEP_ROM_PAGE_SIZE * 3, (byte*)&colorWheelSettings, sizeof colorWheelSettings);
 		eep.read(EEP_ROM_PAGE_SIZE * 4, (byte*)&visualizerSettings, sizeof visualizerSettings);
 		eep.read(EEP_ROM_PAGE_SIZE * 5, (byte*)&visorSettings, sizeof visorSettings);
+		eep.read(EEP_ROM_PAGE_SIZE * 6, (byte*)&policeSettings, sizeof policeSettings);
+		eep.read(EEP_ROM_PAGE_SIZE * 7, (byte*)&christmasSettings, sizeof christmasSettings);
 
 		bleCurrentUpdateDelay = (selectedEffect == 3) ? BLE_DELAY_VISUALIZER : BLE_DELAY;
 #endif
@@ -182,6 +205,8 @@ void setup() {
 	ledService.addCharacteristic(colorWheelSettingsCharacteristic);
 	ledService.addCharacteristic(visualizerSettingsCharacteristic);
 	ledService.addCharacteristic(visorSettingsCharacteristic);
+	ledService.addCharacteristic(policeSettingsCharacteristic);
+	ledService.addCharacteristic(christmasSettingsCharacteristic);
 	ledService.addCharacteristic(audioDataCharacteristic);
 	ledService.addCharacteristic(fnCallCharacteristic);
 	BLE.addService(ledService);
@@ -193,6 +218,8 @@ void setup() {
 	colorWheelSettingsCharacteristic.writeValue(colorWheelSettings, sizeof colorWheelSettings);
 	visualizerSettingsCharacteristic.writeValue(visualizerSettings, sizeof visualizerSettings);
 	visorSettingsCharacteristic.writeValue(visorSettings, sizeof visorSettings);
+	policeSettingsCharacteristic.writeValue(policeSettings, sizeof policeSettings);
+	christmasSettingsCharacteristic.writeValue(christmasSettings, sizeof christmasSettings);
 	fnCallCharacteristic.writeValue(functionCallState, sizeof functionCallState);
 
 	// Characteristics callbacks
@@ -202,6 +229,8 @@ void setup() {
 	colorWheelSettingsCharacteristic.setEventHandler(BLEWritten, ColorWheelSettingsChanged);
 	visualizerSettingsCharacteristic.setEventHandler(BLEWritten, VisualizerSettingsChanged);
 	visorSettingsCharacteristic.setEventHandler(BLEWritten, VisorSettingsChanged);
+	policeSettingsCharacteristic.setEventHandler(BLEWritten, PoliceSettingsChanged);
+	christmasSettingsCharacteristic.setEventHandler(BLEWritten, ChristmasSettingsChanged);
 	audioDataCharacteristic.setEventHandler(BLEWritten, AudioDataChanged);
 	fnCallCharacteristic.setEventHandler(BLEWritten, FnCallChanged);
 
@@ -348,6 +377,36 @@ void VisorSettingsChanged(BLEDevice device, BLECharacteristic characteristic) {
 #endif
 }
 
+void PoliceSettingsChanged(BLEDevice device, BLECharacteristic characteristic) {
+#if VALIDATE_BLE_BUFFERS == 1
+	if (sizeof policeSettings != characteristic.valueLength()) {
+		Serial.println("err policeSettings");
+		return;
+	}
+#endif
+	EffectSettingsChanged(policeSettings, characteristic);
+#if EEP_SAVE_CHANGES == 1
+	if (eepReady) {
+		eep.write(EEP_ROM_PAGE_SIZE * 6, policeSettings, sizeof policeSettings);
+	}
+#endif
+}
+
+void ChristmasSettingsChanged(BLEDevice device, BLECharacteristic characteristic) {
+#if VALIDATE_BLE_BUFFERS == 1
+	if (sizeof christmasSettings != characteristic.valueLength()) {
+		Serial.println("err christmasSettings");
+		return;
+	}
+#endif
+	EffectSettingsChanged(christmasSettings, characteristic);
+#if EEP_SAVE_CHANGES == 1
+	if (eepReady) {
+		eep.write(EEP_ROM_PAGE_SIZE * 7, christmasSettings, sizeof christmasSettings);
+	}
+#endif
+}
+
 void AudioDataChanged(BLEDevice device, BLECharacteristic characteristic) {
 #if VALIDATE_BLE_BUFFERS == 1
 	if (NUM_AUDIO_POINTS != characteristic.valueLength()) {
@@ -411,6 +470,14 @@ void ResetSettings(uint8_t effect) {
 	case 4:
 		visorSettingsCharacteristic.writeValue(visorSettingsDefaults, sizeof visorSettingsDefaults);
 		break;
+
+	case 5:
+		policeSettingsCharacteristic.writeValue(policeSettingsDefaults, sizeof policeSettingsDefaults);
+		break;
+
+	case 6:
+		christmasSettingsCharacteristic.writeValue(christmasSettingsDefaults, sizeof christmasSettingsDefaults);
+		break;
 	}
 }
 
@@ -440,6 +507,14 @@ void Animate() {
 
 	case 4:
 		AnimateVisor();
+		break;
+
+	case 5:
+		AnimatePolice();
+		break;
+
+	case 6:
+		AnimateChristmas();
 		break;
 	}
 }
@@ -677,6 +752,183 @@ void AnimateVisor() {
 		buffer[i * 3] = (col1[1] + colorDifferences[1] * colorPeriod) * brightness;
 		buffer[i * 3 + 1] = (col1[0] + colorDifferences[0] * colorPeriod) * brightness;
 		buffer[i * 3 + 2] = (col1[2] + colorDifferences[2] * colorPeriod) * brightness;
+	}
+
+	pixels.show();
+}
+
+// Police FX
+float policeQuickFlashTimer = 0.0f;
+float policeBlendTimer = 0.0f;
+float policeQuadFlashTimer = 0.0f;
+float policeQuadBlendTimer = 0.0f;
+float policeQuadMixedFlashTimer = 0.0f;
+
+void _PoliceAddFull(float alpha, const uint8_t *color) {
+	alpha = abs(alpha);
+	for (int p = 0; p < NUM_LEDS; ++p) {
+		buffer[p * 3] += color[1] * alpha;
+		buffer[p * 3 + 1] += color[0] * alpha;
+		buffer[p * 3 + 2] += color[2] * alpha;
+	}
+}
+
+void _PoliceAddHalf(float alpha, const uint8_t *color, bool secondHalf) {
+	alpha = abs(alpha);
+	const int half = ceil(NUM_LEDS / 2.0f);
+	int p = secondHalf ? NUM_LEDS - half : 0;
+	int end = secondHalf ? NUM_LEDS : half;
+
+	for (; p < end; ++p) {
+		buffer[p * 3] += color[1] * alpha;
+		buffer[p * 3 + 1] += color[0] * alpha;
+		buffer[p * 3 + 2] += color[2] * alpha;
+	}
+}
+
+void _PoliceAddQuarter(float alpha, const uint8_t *color, int index) {
+	alpha = abs(alpha);
+	alpha = alpha > 0.5f ? 1.0f : 0.0f;
+	const int half = ceil(NUM_LEDS / 2.0f);
+	int p = NUM_LEDS / 4.0f * index;
+	int end = NUM_LEDS / 4.0f * (index + 1);
+	end = min(NUM_LEDS, end);
+
+	for (; p < end; ++p) {
+		buffer[p * 3] += color[1] * alpha;
+		buffer[p * 3 + 1] += color[0] * alpha;
+		buffer[p * 3 + 2] += color[2] * alpha;
+	}
+}
+
+void AnimatePolice() {
+
+	const uint8_t *col1 = &policeSettings[0];
+	const uint8_t *col2 = &policeSettings[3];
+
+	const float ft = frameTime * policeSettings[6] / 10.0f;
+
+	// Zero colors
+	for (int i = 0; i < NUM_LEDS; ++i) {
+		buffer[i * 3] = 0;
+		buffer[i * 3 + 1] = 0;
+		buffer[i * 3 + 2] = 0;
+	}
+
+	// Flash either side quickly a couple of times
+	if (policeQuickFlashTimer < 3.0f * 4.0f) {
+		if (int(policeQuickFlashTimer / 3.0f) % 2 == 0) {
+			_PoliceAddHalf(sin(policeQuickFlashTimer * float(M_PI)), col1, false);
+		}
+		else {
+			_PoliceAddHalf(sin(policeQuickFlashTimer * float(M_PI)), col2, true);
+		}
+
+		policeQuickFlashTimer += ft * 7.0f;
+	}
+	// Blend between both sides
+	else if (policeBlendTimer < 4.0f) {
+
+		if (int(policeBlendTimer) % 2 == 0) {
+			_PoliceAddFull(sin(policeBlendTimer * float(M_PI)), col1);
+		}
+		else {
+			_PoliceAddFull(sin(policeBlendTimer * float(M_PI)), col2);
+		}
+
+		policeBlendTimer += ft * 2.0f;
+	}
+	// Flash in two quads in both colors quickly and switch positions
+	else if (policeQuadFlashTimer < 6.0f * 3.0f) {
+		if (int(policeQuadFlashTimer / 3.0f) % 2 == 0) {
+			_PoliceAddQuarter(sin(policeQuadFlashTimer * float(M_PI)), col1, 0);
+			_PoliceAddQuarter(sin((policeQuadFlashTimer + 0.5f) * float(M_PI)), col2, 2);
+		}
+		else {
+			_PoliceAddQuarter(sin(policeQuadFlashTimer * float(M_PI)), col1, 3);
+			_PoliceAddQuarter(sin((policeQuadFlashTimer + 0.5f) * float(M_PI)), col2, 1);
+		}
+
+		policeQuadFlashTimer += ft * 10.0f;
+	}
+	// Blend between two quads in both colors
+	else if (policeQuadBlendTimer < 8.0f) {
+
+		_PoliceAddQuarter(1.0f, int(policeQuadBlendTimer) % 2 ? col1 : col2, int(policeQuadBlendTimer) % 4);
+
+		policeQuadBlendTimer += ft * 2.0f;
+	}
+	// Keep two quads on and flash two others in both colors
+	else if (policeQuadMixedFlashTimer < 3.0f * 4.0f) {
+		if (int(policeQuadMixedFlashTimer / 3.0f) % 2 == 0) {
+			_PoliceAddQuarter(1.0f, col1, 0);
+			_PoliceAddQuarter(1.0f, col1, 2);
+			_PoliceAddQuarter(sin(policeQuadMixedFlashTimer * float(M_PI)), col2, 1);
+			_PoliceAddQuarter(sin((policeQuadMixedFlashTimer + 0.5f) * float(M_PI)), col2, 3);
+		}
+		else {
+			_PoliceAddQuarter(1.0f, col2, 1);
+			_PoliceAddQuarter(1.0f, col2, 3);
+			_PoliceAddQuarter(sin(policeQuadMixedFlashTimer * float(M_PI)), col1, 0);
+			_PoliceAddQuarter(sin((policeQuadMixedFlashTimer + 0.5f) * float(M_PI)), col1, 2);
+		}
+
+		policeQuadMixedFlashTimer += ft * 4.0f;
+	}
+	// Nothing this frame, reset
+	else {
+		policeQuickFlashTimer = 0.0f;
+		policeBlendTimer = 0.0f;
+		policeQuadFlashTimer = 0.0f;
+		policeQuadBlendTimer = 0.0f;
+		policeQuadMixedFlashTimer = 0.0f;
+	}
+
+	pixels.show();
+}
+
+// Christmas FX
+float christmasTimer = 0.0f;
+int christmasLightsPos = 0;
+int christmasAccent = 0;
+
+void AnimateChristmas() {
+
+	christmasTimer += frameTime * (christmasSettings[9] / 5.0f);
+	while (christmasTimer >= 1.0f) {
+		christmasTimer -= 1.0f;
+		++christmasLightsPos;
+		++christmasAccent;
+	}
+
+	christmasLightsPos %= 3;
+
+	uint8_t *col1 = christmasSettings;
+	uint8_t *col2 = christmasSettings + 3;
+	uint8_t *col3 = christmasSettings + 6;
+
+	if (christmasAccent % 6) {
+		uint8_t *accentColor = christmasAccent % 12 == 0 ? col2 : col3;
+		for (int i = 0; i < NUM_LEDS; ++i) {
+			buffer[i * 3] = accentColor[1];
+			buffer[i * 3 + 1] = accentColor[0];
+			buffer[i * 3 + 2] = accentColor[2];
+		}
+	}
+	else {
+		// Zero colors
+		for (int i = 0; i < NUM_LEDS; ++i) {
+			buffer[i * 3] = 0;
+			buffer[i * 3 + 1] = 0;
+			buffer[i * 3 + 2] = 0;
+		}
+	}
+
+	// Base Light
+	for (int i = christmasLightsPos; i < NUM_LEDS; i += 3) {
+		buffer[i * 3] = col1[1];
+		buffer[i * 3 + 1] = col1[0];
+		buffer[i * 3 + 2] = col1[2];
 	}
 
 	pixels.show();
