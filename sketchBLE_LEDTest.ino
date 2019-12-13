@@ -907,7 +907,7 @@ void AnimateChristmas() {
 	uint8_t *col2 = christmasSettings + 3;
 	uint8_t *col3 = christmasSettings + 6;
 
-	if (christmasAccent % 6) {
+	if (christmasAccent % 6 == 0) {
 		uint8_t *accentColor = christmasAccent % 12 == 0 ? col2 : col3;
 		for (int i = 0; i < NUM_LEDS; ++i) {
 			buffer[i * 3] = accentColor[1];
