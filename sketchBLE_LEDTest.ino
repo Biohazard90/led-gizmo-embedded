@@ -80,6 +80,7 @@ uint8_t christmasSettings[] = {
 	0xFF, 0, 0, // Color 2
 	0, 0xFF, 0, // Color 3
 	10, // Speed
+	64, // Decay
 };
 uint8_t christmasSettingsDefaults[sizeof christmasSettings];
 
@@ -891,6 +892,8 @@ void AnimatePolice() {
 float christmasTimer = 0.0f;
 int christmasLightsPos = 0;
 int christmasAccent = 0;
+float accentAlpha = 0.0f;
+uint8_t *accentColor = nullptr;
 
 void AnimateChristmas() {
 
@@ -908,11 +911,19 @@ void AnimateChristmas() {
 	uint8_t *col3 = christmasSettings + 6;
 
 	if (christmasAccent % 6 == 0) {
-		uint8_t *accentColor = christmasAccent % 12 == 0 ? col2 : col3;
+		accentAlpha = 1.0f;
+		accentColor = christmasAccent % 12 == 0 ? col2 : col3;
+	}
+
+	if (accentAlpha > 0.0f) {
+		accentAlpha -= frameTime * (christmasSettings[10] / 10.0f);
+		if (accentAlpha < 0.0f) {
+			accentAlpha = 0.0f;
+		}
 		for (int i = 0; i < NUM_LEDS; ++i) {
-			buffer[i * 3] = accentColor[1];
-			buffer[i * 3 + 1] = accentColor[0];
-			buffer[i * 3 + 2] = accentColor[2];
+			buffer[i * 3] = accentColor[1] * accentAlpha;
+			buffer[i * 3 + 1] = accentColor[0] * accentAlpha;
+			buffer[i * 3 + 2] = accentColor[2] * accentAlpha;
 		}
 	}
 	else {
