@@ -7,15 +7,16 @@
 
 #include "ColorUtilities.h"
 
-#define PIN 2
-#define NUM_LEDS 5
-#define NUM_AUDIO_POINTS 5
+#define LED_PIN 2
+
+#define NUM_LEDS 29
+#define NUM_AUDIO_POINTS 6
 #define ANIMATION_DELAY int(1000/30) // FPS
 #define BLE_DELAY 0.25f
 #define BLE_DELAY_VISUALIZER 0.025f
 #define EEP_ROM_PAGE_SIZE 32
 
-Adafruit_NeoPixel pixels(NUM_LEDS, PIN, NEO_GRB + NEO_KHZ800);
+Adafruit_NeoPixel pixels(NUM_LEDS, LED_PIN, NEO_GRB + NEO_KHZ800);
 
 // Persisted data
 int selectedEffect = 0;
@@ -51,8 +52,13 @@ uint8_t colorWheelSettings[] = {
 uint8_t colorWheelSettingsDefaults[sizeof colorWheelSettings];
 
 uint8_t visualizerSettings[] = {
+	0xFF, 0, 0, // Color 1
+	0xFF, 0x80, 0, // Color 2
 	255, // Brightness
 	255, // Decay
+	0, // Speed
+	0, // Rainbow cycle
+	10, // Rainbow cycle speed
 };
 uint8_t visualizerSettingsDefaults[sizeof visualizerSettings];
 
@@ -119,7 +125,8 @@ bool eepReady = false;
 #define EEP_LOAD 1
 #define EEP_TEST 0
 #define EEP_SAVE_CHANGES 1
-#define VALIDATE_BLE_BUFFERS 1
+#define VALIDATE_BLE_BUFFERS 0
+#define REDUCE_BRIGHTNESS 0
 
 int lastTime = 0;
 int animationDelayCompensation = 0;
@@ -132,7 +139,7 @@ float connectionEffectTimer = 0.0f;
 BLEDevice central;
 
 void setup() {
-	Serial.begin(115200);
+	//Serial.begin(115200);
 	//Serial.setTimeout(50);
 
 	copySmall(blinkSettingsDefaults, blinkSettings, sizeof blinkSettingsDefaults);
@@ -486,38 +493,52 @@ void Animate() {
 
 	if (connectionEffectTimer > 0.0f) {
 		ConnectionFX();
-		return;
+	}
+	else {
+		switch (selectedEffect) {
+		case 0:
+			AnimateBlink();
+			break;
+
+		case 1:
+			AnimateWave();
+			break;
+
+		case 2:
+			AnimateColorWheel();
+			break;
+
+		case 3:
+			AnimateVisualizer();
+			break;
+
+		case 4:
+			AnimateVisor();
+			break;
+
+		case 5:
+			AnimatePolice();
+			break;
+
+		case 6:
+			AnimateChristmas();
+			break;
+		}
 	}
 
-	switch (selectedEffect) {
-	case 0:
-		AnimateBlink();
-		break;
-
-	case 1:
-		AnimateWave();
-		break;
-
-	case 2:
-		AnimateColorWheel();
-		break;
-
-	case 3:
-		AnimateVisualizer();
-		break;
-
-	case 4:
-		AnimateVisor();
-		break;
-
-	case 5:
-		AnimatePolice();
-		break;
-
-	case 6:
-		AnimateChristmas();
-		break;
+#if REDUCE_BRIGHTNESS
+	for (int i = 0; i < NUM_LEDS * 3; ++i) {
+		if (buffer[i]) {
+			buffer[i] /= 4;
+			if (buffer[i] == 0) {
+				buffer[i] = 1;
+			}
+		}
 	}
+#endif
+
+	pixels.show();
+
 }
 
 // Shared FX
@@ -565,7 +586,6 @@ void AnimateBlink() {
 		buffer[i * 3 + 1] = buffer[1];
 		buffer[i * 3 + 2] = buffer[2];
 	}
-	pixels.show();
 }
 
 //Wave FX
@@ -639,8 +659,6 @@ void AnimateWave() {
 			}
 		}
 	}
-
-	pixels.show();
 }
 
 // Color wheel FX
@@ -664,30 +682,84 @@ void AnimateColorWheel() {
 		float hue = fmod((colorWheelTimer + (i / float(NUM_LEDS) * width)), 1.0f) * 360.0f;
 		HSV2RGB(hue, 100, 100 * brightness, led, led + 1, led + 2);
 	}
-
-	pixels.show();
 }
 
 // Audio vis FX
+float audioPosition = 0.0f;
+
 void AnimateVisualizer() {
 
-	for (int i = 0; i < NUM_LEDS; ++i) {
-		float brightness = visualizerSettings[0] * audioData[i];
-		buffer[i * 3] = brightness;
-		buffer[i * 3 + 1] = brightness;
-		buffer[i * 3 + 2] = brightness;
+	uint8_t *colBase = visualizerSettings;
+	uint8_t *colPoints[] = {
+		visualizerSettings + 3,
+		visualizerSettings + 3,
+		visualizerSettings + 3,
+		visualizerSettings + 3,
+		visualizerSettings + 3
+	};
+	uint8_t colRainbow[6 * 3];
+
+	const bool isRainbow = visualizerSettings[9] != 0;
+	if (isRainbow) {
+		colBase = colRainbow;
+		colPoints[0] = colRainbow + 3;
+		colPoints[1] = colRainbow + 6;
+		colPoints[2] = colRainbow + 9;
+		colPoints[3] = colRainbow + 12;
+		colPoints[4] = colRainbow + 15;
+
+		const float rainbowSpeed = visualizerSettings[10];
+		rainbowCycleTimer += frameTime * rainbowSpeed * 2;
+		while (rainbowCycleTimer > 360.0f) {
+			rainbowCycleTimer -= 360.0f;
+		}
+
+		const float stepOffset = 360.0f / 6.0f;
+		HSV2RGB(rainbowCycleTimer, 100, 100, colRainbow);
+		HSV2RGB(fmod(rainbowCycleTimer + stepOffset, 360.0f), 100, 100, colRainbow + 3);
+		HSV2RGB(fmod(rainbowCycleTimer + stepOffset * 2, 360.0f), 100, 100, colRainbow + 6);
+		HSV2RGB(fmod(rainbowCycleTimer + stepOffset * 3, 360.0f), 100, 100, colRainbow + 9);
+		HSV2RGB(fmod(rainbowCycleTimer + stepOffset * 4, 360.0f), 100, 100, colRainbow + 12);
+		HSV2RGB(fmod(rainbowCycleTimer + stepOffset * 5, 360.0f), 100, 100, colRainbow + 15);
 	}
 
+	const float baseBrightness = visualizerSettings[6] / 255.0f;
+
+	// Rotate lights
+	audioPosition += visualizerSettings[8] / 10.0f * frameTime;
+	while (audioPosition >= 1.0f) {
+		audioPosition -= 1.0f;
+	}
+
+	// Apply points
+	const int numFloatingPoints = NUM_AUDIO_POINTS - 1;
+	for (int i = 0; i < NUM_LEDS; ++i) {
+		const float ledPosition = fmod(i / float(NUM_LEDS) + audioPosition, 1.0f);
+		const int visPoint1 = floor(ledPosition * numFloatingPoints);
+		const int visPoint2 = (visPoint1 + 1) % numFloatingPoints;
+		const float visPoint1Amt = 1.0f - fmod(ledPosition * numFloatingPoints, 1.0f);
+		const float visPoint2Amt = 1.0f - visPoint1Amt;
+
+		const float brightness1 = baseBrightness * audioData[visPoint1 + 1] * visPoint1Amt;
+		const float brightness2 = baseBrightness * audioData[visPoint2 + 1] * visPoint2Amt;
+
+		buffer[i * 3] = min(255, brightness1 * colPoints[visPoint1][1] + brightness2 * colPoints[visPoint2][1] +
+			audioData[0] * baseBrightness * colBase[1]);
+		buffer[i * 3 + 1] = min(255, brightness1 * colPoints[visPoint1][0] + brightness2 * colPoints[visPoint2][0] +
+			audioData[0] * baseBrightness * colBase[0]);
+		buffer[i * 3 + 2] = min(255, brightness1 * colPoints[visPoint1][2] + brightness2 * colPoints[visPoint2][2] +
+			audioData[0] * baseBrightness * colBase[2]);
+	}
+
+	// Decay audio light
 	for (int i = 0; i < NUM_AUDIO_POINTS; ++i) {
 		if (audioDecay[i]) {
-			audioData[i] -= frameTime * visualizerSettings[1] / 10.0f;
+			audioData[i] -= frameTime * visualizerSettings[7] / 10.0f;
 			if (audioData[i] < 0.0f) {
 				audioData[i] = 0.0f;
 			}
 		}
 	}
-
-	pixels.show();
 }
 
 // Visor FX
@@ -754,8 +826,6 @@ void AnimateVisor() {
 		buffer[i * 3 + 1] = (col1[0] + colorDifferences[0] * colorPeriod) * brightness;
 		buffer[i * 3 + 2] = (col1[2] + colorDifferences[2] * colorPeriod) * brightness;
 	}
-
-	pixels.show();
 }
 
 // Police FX
@@ -790,7 +860,6 @@ void _PoliceAddHalf(float alpha, const uint8_t *color, bool secondHalf) {
 void _PoliceAddQuarter(float alpha, const uint8_t *color, int index) {
 	alpha = abs(alpha);
 	alpha = alpha > 0.5f ? 1.0f : 0.0f;
-	const int half = ceil(NUM_LEDS / 2.0f);
 	int p = NUM_LEDS / 4.0f * index;
 	int end = NUM_LEDS / 4.0f * (index + 1);
 	end = min(NUM_LEDS, end);
@@ -802,8 +871,25 @@ void _PoliceAddQuarter(float alpha, const uint8_t *color, int index) {
 	}
 }
 
-void AnimatePolice() {
+void _PoliceAddAnimatedStrike(const uint8_t *color, int size, float time, bool secondHalf) {
+	int p = 0;
+	int end = NUM_LEDS;
+	time *= (NUM_LEDS + size) / float(NUM_LEDS);
 
+	for (; p < end; ++p) {
+		const float minThreshold = p / float(NUM_LEDS);
+		const float maxThreshold = (p + size) / float(NUM_LEDS);
+
+		if (time > minThreshold &&
+			time < maxThreshold) {
+			buffer[p * 3] += color[1];
+			buffer[p * 3 + 1] += color[0];
+			buffer[p * 3 + 2] += color[2];
+		}
+	}
+}
+
+void AnimatePolice() {
 	const uint8_t *col1 = &policeSettings[0];
 	const uint8_t *col2 = &policeSettings[3];
 
@@ -853,9 +939,13 @@ void AnimatePolice() {
 		policeQuadFlashTimer += ft * 10.0f;
 	}
 	// Blend between two quads in both colors
-	else if (policeQuadBlendTimer < 8.0f) {
-
-		_PoliceAddQuarter(1.0f, int(policeQuadBlendTimer) % 2 ? col1 : col2, int(policeQuadBlendTimer) % 4);
+	else if (policeQuadBlendTimer < 4.0f) {
+		if (int(policeQuadBlendTimer) % 2 == 0) {
+			_PoliceAddAnimatedStrike(col1, NUM_LEDS / 5, fmod(policeQuadBlendTimer, 1.0f), false);
+		}
+		else {
+			_PoliceAddAnimatedStrike(col2, NUM_LEDS / 5, 1.0f - fmod(policeQuadBlendTimer, 1.0f), true);
+		}
 
 		policeQuadBlendTimer += ft * 2.0f;
 	}
@@ -884,8 +974,6 @@ void AnimatePolice() {
 		policeQuadBlendTimer = 0.0f;
 		policeQuadMixedFlashTimer = 0.0f;
 	}
-
-	pixels.show();
 }
 
 // Christmas FX
@@ -910,39 +998,41 @@ void AnimateChristmas() {
 	uint8_t *col2 = christmasSettings + 3;
 	uint8_t *col3 = christmasSettings + 6;
 
+	uint8_t activeColor[] = {
+		col1[0],
+		col1[1],
+		col1[2]
+	};
+
 	if (christmasAccent % 6 == 0) {
 		accentAlpha = 1.0f;
 		accentColor = christmasAccent % 12 == 0 ? col2 : col3;
 	}
 
 	if (accentAlpha > 0.0f) {
+		activeColor[0] = activeColor[0] + (accentColor[0] - activeColor[0]) * accentAlpha;
+		activeColor[1] = activeColor[1] + (accentColor[1] - activeColor[1]) * accentAlpha;
+		activeColor[2] = activeColor[2] + (accentColor[2] - activeColor[2]) * accentAlpha;
+
 		accentAlpha -= frameTime * (christmasSettings[10] / 10.0f);
 		if (accentAlpha < 0.0f) {
 			accentAlpha = 0.0f;
 		}
-		for (int i = 0; i < NUM_LEDS; ++i) {
-			buffer[i * 3] = accentColor[1] * accentAlpha;
-			buffer[i * 3 + 1] = accentColor[0] * accentAlpha;
-			buffer[i * 3 + 2] = accentColor[2] * accentAlpha;
-		}
 	}
-	else {
-		// Zero colors
-		for (int i = 0; i < NUM_LEDS; ++i) {
-			buffer[i * 3] = 0;
-			buffer[i * 3 + 1] = 0;
-			buffer[i * 3 + 2] = 0;
-		}
+
+	// Zero colors
+	for (int i = 0; i < NUM_LEDS; ++i) {
+		buffer[i * 3] = 0;
+		buffer[i * 3 + 1] = 0;
+		buffer[i * 3 + 2] = 0;
 	}
 
 	// Base Light
 	for (int i = christmasLightsPos; i < NUM_LEDS; i += 3) {
-		buffer[i * 3] = col1[1];
-		buffer[i * 3 + 1] = col1[0];
-		buffer[i * 3 + 2] = col1[2];
+		buffer[i * 3] = activeColor[1];
+		buffer[i * 3 + 1] = activeColor[0];
+		buffer[i * 3 + 2] = activeColor[2];
 	}
-
-	pixels.show();
 }
 
 void UpdateBLE() {
@@ -984,5 +1074,4 @@ void ConnectionFX() {
 		buffer[i * 3 + 1] = buffer[1];
 		buffer[i * 3 + 2] = buffer[2];
 	}
-	pixels.show();
 }

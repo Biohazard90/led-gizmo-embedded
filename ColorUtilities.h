@@ -56,3 +56,8 @@ void HSV2RGB(float h, float s, float v, byte *r, byte *g, byte *b)
 		*b = round(255 * q);
 	}
 }
+
+void HSV2RGB(float h, float s, float v, byte *rgb)
+{
+	HSV2RGB(h, s, v, rgb, rgb + 1, rgb + 2);
+}
