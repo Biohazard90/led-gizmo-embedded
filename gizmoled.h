@@ -13,7 +13,9 @@ enum EffectName
 {
 	EFFECTNAME_BLINK = 0,
 	EFFECTNAME_WHEEL,
-	EFFECTNAME_VISUALIZER = 10,
+	EFFECTNAME_OPAQUE,
+	EFFECTNAME_TEST,
+	EFFECTNAME_VISUALIZER,
 };
 
 namespace GizmoLED
@@ -62,7 +64,6 @@ namespace GizmoLED
 	{
 		EffectType type;
 		EffectName name;
-		int flag;
 		int eepOffset;
 
 		uint8_t settingsSize;
@@ -84,11 +85,25 @@ namespace GizmoLED
 	//extern bool *audioDecay;
 }
 
-#define BEGIN_EFFECT_SETTINGS(name) \
-	uint8_t name ## Settings[] = {
+//#define BEGIN_EFFECT_SETTINGS(name) \
+//	uint8_t name ## Settings[] = {
+//
+//#define END_EFFECT_SETTINGS() \
+//	};
+
+#define BEGIN_EFFECT_SETTINGS(variableName, enumName, payload) \
+	uint8_t variableName ## Data[] = { \
+		payload \
+	}; \
+	namespace fx ## variableName { \
+		static EffectName e = enumName;\
+	} \
+	namespace variableName ## Settings { \
+		static uint8_t * base = variableName ## Data; \
+		static uint8_t pos = 0;
 
 #define END_EFFECT_SETTINGS() \
-	};
+	}
 
 #define DECLARE_EFFECT_SETTINGS_COLOR(name, r, g, b) \
 	GizmoLED::VarType::VARTYPE_COLOR, name, r, g, b,
@@ -99,8 +114,17 @@ namespace GizmoLED
 #define DECLARE_EFFECT_SETTINGS_CHECKBOX(name, value) \
 	GizmoLED::VarType::VARTYPE_CHECKBOX, name, value,
 
-#define DECLARE_EFFECT_VAR(varName, effectName, offset) \
-	uint8_t *varName = effectName ## Settings + (offset + 2)
+#define EFFECT_VAR_COLOR(varName) \
+	uint8_t *varName = base + ((pos+=5) + 2 - 5);
+
+#define EFFECT_VAR_SLIDER(varName) \
+	uint8_t *varName = base + ((pos+=5) + 2 - 5);
+
+#define EFFECT_VAR_CHECKBOX(varName) \
+	uint8_t *varName = base + ((pos+=3) + 2 - 5);
+
+//#define DECLARE_EFFECT_VAR(varName, effectName, offset) \
+//	uint8_t *varName = effectName ## Settings + (offset + 2)
 
 #define BEGIN_EFFECTS() \
 	GizmoLED::Effect _effects[] = {
@@ -110,9 +134,9 @@ namespace GizmoLED
 
 // (PROGMEM (uuid), BLERead | BLEWrite, sizeof name ## Settings),\
 
-#define DECLARE_EFFECT(animationFunction, name, type) \
-	{type, name, 0, 0, \
-	sizeof name ## Settings, name ## Settings, nullptr, \
+#define DECLARE_EFFECT(variableName, animationFunction, type) \
+	{type, fx ## variableName::e, fx ## variableName::e + 1, \
+	sizeof variableName ## Data, variableName ## Data, nullptr, \
 	nullptr, \
 	animationFunction},
 
@@ -123,8 +147,6 @@ namespace GizmoLED
 		String uuidBase(PROGMEM "e8942ca1-d9e7-4c45-b96c-10cf850bfa"); \
 		for (int e; e < numEffects; ++e) { \
 			GizmoLED::Effect &effect = _effects[e]; \
-			effect.flag = (1 << e); \
-			effect.eepOffset = e + 1; \
 			String tempUuid = String(uuidBase + (effect.name < 10 ? String("0") + String(effect.name) : String(effect.name))); \
 			char *uuid = (char*)malloc(tempUuid.length() + 1); \
 			const char *rd = tempUuid.c_str(); \
