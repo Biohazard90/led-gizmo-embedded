@@ -216,22 +216,15 @@ BLEDevice central;
 
 void EffectTypeChanged(BLEDevice device, BLECharacteristic characteristic)
 {
-	uint8_t effectName = *(const uint8_t*)characteristic.value();
-	Effect *effect = nullptr;
-	for (int i = 0; i < numEffects; ++i)
-	{
-		Effect &e = effects[i];
-		if (e.name == effectName) {
-			effect = &e;
-			genericData.selectedEffect = i;
-		}
-	}
-
-	if (effect == nullptr) {
+	uint8_t effectIndex = *(const uint8_t*)characteristic.value();
+	if (effectIndex >= numEffects) {
 		return;
 	}
 
-	if (effect->type != EFFECTTYPE_VISUALIZER)
+	genericData.selectedEffect = effectIndex;
+
+	Effect &effect = effects[effectIndex];
+	if (effect.type != EFFECTTYPE_VISUALIZER)
 	{
 		genericData.selectedEffectSecondary = genericData.selectedEffect;
 	}
@@ -243,7 +236,7 @@ void EffectTypeChanged(BLEDevice device, BLECharacteristic characteristic)
 	}
 #endif
 
-	bleCurrentUpdateDelay = (effect->type == EFFECTTYPE_VISUALIZER) ? BLE_DELAY_VISUALIZER : BLE_DELAY;
+	bleCurrentUpdateDelay = (effect.type == EFFECTTYPE_VISUALIZER) ? BLE_DELAY_VISUALIZER : BLE_DELAY;
 }
 
 void EffectSettingsChanged(BLEDevice device, BLECharacteristic characteristic)
@@ -306,25 +299,13 @@ void copySmall(uint8_t *dst, uint8_t *src, int size)
 	}
 }
 
-void ResetSettings(uint8_t effectName)
+void ResetSettings(uint8_t effectIndex)
 {
-	//Effect *effect = nullptr;
-	//for (int e = 0; e < numEffects; ++e)
-	//{
-	//	Effect &_effect = effects[e];
-	//	if (_effect.name == effectName)
-	//	{
-	//		effect = &_effect;
-	//		break;
-	//	}
-	//}
+	if (effectIndex >= numEffects)
+		return;
 
-	//if (effect == nullptr)
-	//{
-	//	return;
-	//}
-
-	//effect->characteristic->writeValue(effect->defaultSettings, effect->settingsSize);
+	Effect &effect = effects[effectIndex];
+	effect.characteristic->writeValue(effect.defaultSettings, effect.settingsSize);
 }
 
 //int lastAudioTime = 0;
@@ -385,17 +366,9 @@ void FnCallChanged(BLEDevice device, BLECharacteristic characteristic)
 // Connection FX
 void ConnectionFX()
 {
-	float brightness = cos(float(connectionEffectTimer * M_PI * 2 - M_PI)) * 0.5f + 0.5f;
-	uint8_t rgbFX[] =
-	{
-		0,
-		96 * brightness,
-		255 * brightness
-	};
-
 	if (connectionAnimation != nullptr)
 	{
-		connectionAnimation(frameTime, rgbFX);
+		connectionAnimation(frameTime, 1.0f - connectionEffectTimer);
 	}
 }
 
@@ -405,7 +378,7 @@ void Animate()
 	{
 		ConnectionFX();
 
-		connectionEffectTimer -= frameTime * 2.5f;
+		connectionEffectTimer -= frameTime;
 		if (connectionEffectTimer < 0.0f)
 		{
 			connectionEffectTimer = 0.0f;
@@ -472,7 +445,7 @@ void UpdateBLE()
 		central = BLE.central();
 		if (central && central.connected())
 		{
-			connectionEffectTimer = 2.0f;
+			connectionEffectTimer = 1.0f;
 		}
 	}
 }

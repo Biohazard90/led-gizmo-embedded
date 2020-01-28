@@ -14,6 +14,7 @@ enum EffectName
 	EFFECTNAME_BLINK = 0,
 	EFFECTNAME_WHEEL,
 	EFFECTNAME_OPAQUE,
+	EFFECTNAME_GRADIENT,
 	EFFECTNAME_TEST,
 	EFFECTNAME_VISUALIZER,
 };
@@ -43,6 +44,7 @@ namespace GizmoLED
 		VARNAME_RAINBOWLENGTH,
 		VARNAME_FADEIN,
 		VARNAME_FADEOUT,
+		VARNAME_ANGLE,
 	};
 
 	enum EffectType
@@ -58,7 +60,7 @@ namespace GizmoLED
 	//};
 
 	typedef void(*FnEffectAnimation)(float frameTime);
-	typedef void(*FnConnectionAnimation)(float frameTime, uint8_t *rgb);
+	typedef void(*FnConnectionAnimation)(float frameTime, float percent);
 
 	struct Effect
 	{
@@ -147,7 +149,7 @@ namespace GizmoLED
 		String uuidBase(PROGMEM "e8942ca1-d9e7-4c45-b96c-10cf850bfa"); \
 		for (int e; e < numEffects; ++e) { \
 			GizmoLED::Effect &effect = _effects[e]; \
-			String tempUuid = String(uuidBase + (effect.name < 10 ? String("0") + String(effect.name) : String(effect.name))); \
+			String tempUuid = String(uuidBase + (e < 10 ? String("0") + String(e) : String(e))); \
 			char *uuid = (char*)malloc(tempUuid.length() + 1); \
 			const char *rd = tempUuid.c_str(); \
 			char *wr = uuid; \
