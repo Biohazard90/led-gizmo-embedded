@@ -123,7 +123,7 @@ namespace GizmoLED
 	uint8_t *varName = base + ((pos+=5) + 2 - 5);
 
 #define EFFECT_VAR_CHECKBOX(varName) \
-	uint8_t *varName = base + ((pos+=3) + 2 - 5);
+	uint8_t *varName = base + ((pos+=3) + 2 - 3);
 
 //#define DECLARE_EFFECT_VAR(varName, effectName, offset) \
 //	uint8_t *varName = effectName ## Settings + (offset + 2)
