@@ -17,6 +17,8 @@ enum EffectName
 	EFFECTNAME_GRADIENT,
 	EFFECTNAME_TEST,
 	EFFECTNAME_VISUALIZER,
+	EFFECTNAME_PULSE,
+	EFFECTNAME_SPARKLE,
 };
 
 namespace GizmoLED
@@ -137,7 +139,7 @@ namespace GizmoLED
 // (PROGMEM (uuid), BLERead | BLEWrite, sizeof name ## Settings),\
 
 #define DECLARE_EFFECT(variableName, animationFunction, type) \
-	{type, fx ## variableName::e, fx ## variableName::e + 1, \
+	{type, fx ## variableName::e, fx ## variableName::e + 2, \
 	sizeof variableName ## Data, variableName ## Data, nullptr, \
 	nullptr, \
 	animationFunction},

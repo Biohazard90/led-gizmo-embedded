@@ -14,7 +14,8 @@ using namespace GizmoLED;
 #define BLE_DELAY 0.25f
 #define BLE_DELAY_VISUALIZER 0.0001f
 #define EEP_ROM_PAGE_SIZE 64
-#define NUM_AUDIO_FRAMES 1
+#define CONNECTION_FX_TIME 1.5f
+#define AUDIO_HOLD_TIME 10.0f
 
 // Persisted data
 struct Generic
@@ -24,6 +25,7 @@ struct Generic
 	uint8_t numberOfEffects = 0;
 	//int visualizerFlags = 0;
 	uint8_t effectNames[MAX_NUMBER_EFFECTS] = { 0 };
+	uint8_t romVersion = 5;
 };
 Generic genericData;
 
@@ -104,17 +106,26 @@ namespace GizmoLED
 	FnConnectionAnimation connectionAnimation = nullptr;
 }
 
+#define MAX_FNCALL_ARGS 32
 uint8_t functionCallState[] =
 {
-	0, // Reset call
-	0, // Reset FX index
+	0, // Change trigger
+	0, // Function index
+	// var args in characteristic
 };
 
 // GRB format
 //uint8_t *buffer;
 
+#define MAX_DEVICE_NAME 32
+#define EEP_DEVICE_NAME_OFFSET 1
+const char *defaultDeviceName = PROGMEM "Gizmo";
+
 // BLE
-BLEService ledService(PROGMEM "e8942ca1-eef7-4a95-afeb-e3d07e8af52e");
+const char *serviceID = PROGMEM "e8942ca1-eef7-4a95-afeb-e3d07e8af52e";
+BLEService ledService(serviceID);
+BLEService ledServiceAD(serviceID);
+BLEService ledServiceADV(PROGMEM "e8942ca1-eef7-4a95-afeb-e3d07e8af52d");
 BLECharacteristic effectTypeCharacteristic(PROGMEM "e8942ca1-d9e7-4c45-b96c-10cf850bfb00", BLERead | BLEWrite, sizeof genericData);
 //BLECharacteristic blinkSettingsCharacteristic(PROGMEM "e8942ca1-d9e7-4c45-b96c-10cf850bfa01", BLERead | BLEWrite, sizeof blinkSettings);
 //BLECharacteristic waveSettingsCharacteristic(PROGMEM "e8942ca1-d9e7-4c45-b96c-10cf850bfa02", BLERead | BLEWrite, sizeof waveSettings);
@@ -126,7 +137,7 @@ BLECharacteristic effectTypeCharacteristic(PROGMEM "e8942ca1-d9e7-4c45-b96c-10cf
 
 // Upstream BLE
 BLECharacteristic audioDataCharacteristic(PROGMEM "e8942ca1-d9e7-4c45-b96c-20cf850bfa00", BLEWrite | BLEWriteWithoutResponse, sizeof audioData);
-BLECharacteristic fnCallCharacteristic(PROGMEM "e8942ca1-d9e7-4c45-b96c-20cf850bfa01", BLEWrite, sizeof functionCallState);
+BLECharacteristic fnCallCharacteristic(PROGMEM "e8942ca1-d9e7-4c45-b96c-20cf850bfa01", BLEWrite, sizeof functionCallState + MAX_FNCALL_ARGS);
 
 // EEP
 extEEPROM eep(kbits_256, 1, EEP_ROM_PAGE_SIZE);
@@ -211,8 +222,14 @@ float bleUpdateTimer = 0;
 float bleCurrentUpdateDelay = BLE_DELAY;
 
 float connectionEffectTimer = 0.0f;
+float lastAudioTime = 0.0f;
 
 BLEDevice central;
+
+void SetVisualizerInputSupported(bool isSupported)
+{
+	BLE.setAdvertisedService(isSupported ? ledServiceADV : ledServiceAD);
+}
 
 void EffectTypeChanged(BLEDevice device, BLECharacteristic characteristic)
 {
@@ -228,6 +245,10 @@ void EffectTypeChanged(BLEDevice device, BLECharacteristic characteristic)
 	{
 		genericData.selectedEffectSecondary = genericData.selectedEffect;
 	}
+
+	BLE.stopAdvertise();
+	SetVisualizerInputSupported(effect.type == EFFECTTYPE_VISUALIZER);
+	BLE.advertise();
 
 #if EEP_SAVE_CHANGES == 1
 	if (eepReady)
@@ -308,6 +329,27 @@ void ResetSettings(uint8_t effectIndex)
 	effect.characteristic->writeValue(effect.defaultSettings, effect.settingsSize);
 }
 
+void RenameDevice(const uint8_t *args, int len)
+{
+	if (len < 1)
+	{
+		uint8_t noName = 0;
+		eep.write(EEP_ROM_PAGE_SIZE * EEP_DEVICE_NAME_OFFSET, (byte*)&noName, sizeof noName);
+
+		BLE.setLocalName(defaultDeviceName);
+	}
+	else
+	{
+		uint8_t tmpName[MAX_DEVICE_NAME + 1] = { 0 };
+		memcpy(tmpName, args, len);
+		eep.write(EEP_ROM_PAGE_SIZE * EEP_DEVICE_NAME_OFFSET, (byte*)tmpName, len + 1);
+
+		BLE.stopAdvertise();
+		BLE.setLocalName((const char*)tmpName);
+		BLE.advertise();
+	}
+}
+
 //int lastAudioTime = 0;
 //int audioFrame = 0;
 void AudioDataChanged(BLEDevice device, BLECharacteristic characteristic)
@@ -324,7 +366,8 @@ void AudioDataChanged(BLEDevice device, BLECharacteristic characteristic)
 	//++audioFrame;
 
 	const uint8_t *value = characteristic.value();
-	for (int i = 0; i < NUM_AUDIO_POINTS * NUM_AUDIO_FRAMES; ++i)
+	bool anyAudioReceived = false;
+	for (int i = 0; i < NUM_AUDIO_POINTS; ++i)
 	{
 		float nValue = value[i] / 255.0f;
 		//if (nValue >= audioData[i])
@@ -335,30 +378,48 @@ void AudioDataChanged(BLEDevice device, BLECharacteristic characteristic)
 		//else {
 		//	audioDecay[i] = true;
 		//}
+
+		anyAudioReceived = anyAudioReceived || nValue > 0.0f;
+	}
+
+	if (anyAudioReceived)
+	{
+		lastAudioTime = AUDIO_HOLD_TIME;
 	}
 }
 
 void FnCallChanged(BLEDevice device, BLECharacteristic characteristic)
 {
-	if (sizeof functionCallState != characteristic.valueLength())
+	const int fnStateLength = sizeof functionCallState;
+	const int dataLength = characteristic.valueLength() - fnStateLength;
+	if (characteristic.valueLength() < fnStateLength)
 	{
 		return;
 	}
 
 	const uint8_t *value = characteristic.value();
-	for (int i = 0; i < 1; ++i)
+	if (functionCallState[0] != value[0])
 	{
-		if (functionCallState[i] != value[i])
-		{
-			functionCallState[i] = value[i];
+		functionCallState[0] = value[0];
 
-			// Call this function
-			switch (i)
+		// Call this function
+		switch (value[1])
+		{
+		case 0:
+		{
+			if (dataLength >= 1)
 			{
-			case 0:
-				ResetSettings(value[1]);
-				break;
+				ResetSettings(value[2]);
 			}
+		}
+		break;
+
+		case 1:
+		{
+			int nameLength = characteristic.valueLength() - fnStateLength;
+			RenameDevice(characteristic.value() + fnStateLength, nameLength);
+		}
+		break;
 		}
 	}
 }
@@ -368,7 +429,7 @@ void ConnectionFX()
 {
 	if (connectionAnimation != nullptr)
 	{
-		connectionAnimation(frameTime, 1.0f - connectionEffectTimer);
+		connectionAnimation(frameTime, (CONNECTION_FX_TIME - connectionEffectTimer) / CONNECTION_FX_TIME);
 	}
 }
 
@@ -388,42 +449,36 @@ void Animate()
 	{
 		if (genericData.selectedEffect >= 0 && genericData.selectedEffect < numEffects)
 		{
-			Effect &effect = effects[genericData.selectedEffect];
-			effect.fnEffectAnimation(frameTime);
+			Effect *effect = &effects[genericData.selectedEffect];
+
+			// Only show visualizer if audio is playing
+			if (effect->type == EFFECTTYPE_VISUALIZER)
+			{
+				if (lastAudioTime > 0.0f)
+				{
+					lastAudioTime -= frameTime;
+				}
+
+				if (lastAudioTime <= 0.0f)
+				{
+					lastAudioTime = 0.0f;
+					if (genericData.selectedEffectSecondary >= 0 && genericData.selectedEffectSecondary < numEffects)
+					{
+						effect = &effects[genericData.selectedEffectSecondary];
+					}
+					else
+					{
+						effect = nullptr;
+					}
+				}
+			}
+
+			if (effect != nullptr)
+			{
+				effect->fnEffectAnimation(frameTime);
+			}
 		}
-
-		//switch (genericData.selectedEffect) {
-		//case 0:
-		//	//AnimateBlink();
-		//	break;
-
-		//case 1:
-		//	//AnimateWave();
-		//	break;
-
-		//case 2:
-		//	//AnimateColorWheel();
-		//	break;
-
-		//case 3:
-		//	//AnimateVisualizer();
-		//	break;
-
-		//case 4:
-		//	//AnimateVisor();
-		//	break;
-
-		//case 5:
-		//	//AnimatePolice();
-		//	break;
-
-		//case 6:
-		//	//AnimateChristmas();
-		//	break;
-		//}
 	}
-
-	//pixels.show();
 }
 
 void UpdateBLE()
@@ -445,7 +500,10 @@ void UpdateBLE()
 		central = BLE.central();
 		if (central && central.connected())
 		{
-			connectionEffectTimer = 1.0f;
+			connectionEffectTimer = CONNECTION_FX_TIME;
+
+			// Reset function call trigger
+			functionCallState[0] = 0;
 		}
 	}
 }
@@ -470,23 +528,31 @@ void GizmoLEDSetup()
 	//copySmall(policeSettingsDefaults, policeSettings, sizeof policeSettingsDefaults);
 	//copySmall(christmasSettingsDefaults, christmasSettings, sizeof christmasSettingsDefaults);
 
-	// LED init
-	//pixels.begin();
-	//buffer = pixels.getPixels();
+	// BLE init
+	BLE.setConnectionInterval(0x0001, 0x0001);
+	BLE.begin();
+	BLE.setLocalName(defaultDeviceName);
 
 	// EEP init
 	if (eep.begin(eep.twiClock400kHz) == 0)
 	{
 		eepReady = true;
 
-#if EEP_INIT == 1
-		eep.write(0, (byte*)&genericData, sizeof genericData);
-		for (int e = 0; e < numEffects; ++e)
+		Generic tempGeneric;
+		eep.read(0, (byte*)&tempGeneric, sizeof tempGeneric);
+		if (tempGeneric.romVersion != genericData.romVersion)
 		{
-			Effect &effect = effects[e];
-			eep.write(EEP_ROM_PAGE_SIZE * effect.eepOffset, (byte*)effect.settings, effect.settingsSize);
+			// ROM mismatch, init all data
+			eep.write(0, (byte*)&genericData, sizeof genericData);
+
+			uint8_t noName = 0;
+			eep.write(EEP_ROM_PAGE_SIZE * 1, (byte*)&noName, sizeof noName);
+			for (int e = 0; e < numEffects; ++e)
+			{
+				Effect &effect = effects[e];
+				eep.write(EEP_ROM_PAGE_SIZE * effect.eepOffset, (byte*)effect.settings, effect.settingsSize);
+			}
 		}
-#endif
 
 #if EEP_LOAD == 1
 		eep.read(0, (byte*)&genericData, sizeof genericData);
@@ -494,6 +560,13 @@ void GizmoLEDSetup()
 		{
 			Effect &effect = effects[e];
 			eep.read(EEP_ROM_PAGE_SIZE * effect.eepOffset, (byte*)effect.settings, effect.settingsSize);
+		}
+
+		uint8_t userName[MAX_DEVICE_NAME + 1] = { 0 };
+		eep.read(EEP_ROM_PAGE_SIZE * EEP_DEVICE_NAME_OFFSET, (byte*)&userName, MAX_DEVICE_NAME);
+		if (*userName != 0)
+		{
+			BLE.setLocalName((const char*)userName);
 		}
 #endif
 
@@ -531,11 +604,6 @@ void GizmoLEDSetup()
 	//	Serial.println("eep err");
 	//}
 
-	// BLE init
-	BLE.setConnectionInterval(0x0001, 0x0001);
-	BLE.begin();
-	BLE.setLocalName(PROGMEM "Gizmo");
-
 	for (int e = 0; e < numEffects; ++e)
 	{
 		Effect &effect = effects[e];
@@ -560,7 +628,11 @@ void GizmoLEDSetup()
 
 	// Advertise
 	BLE.addService(ledService);
-	BLE.setAdvertisedService(ledService);
+	//BLE.setAdvertisedService(ledService);
+
+	SetVisualizerInputSupported(genericData.selectedEffect < numEffects &&
+		effects[genericData.selectedEffect].type == EFFECTTYPE_VISUALIZER);
+
 	BLE.setAdvertisingInterval(320); // 160 == 100ms
 	BLE.advertise();
 
