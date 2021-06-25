@@ -11,8 +11,8 @@ using namespace GizmoLED;
 #define LED_PIN 2
 
 #define NUM_LEDS 101
-#define BLE_DELAY 0.25f
-#define BLE_DELAY_VISUALIZER 0.0001f
+#define BLE_DELAY 0.1f
+#define BLE_DELAY_VISUALIZER 0.0f
 #define EEP_ROM_PAGE_SIZE 64
 #define CONNECTION_FX_TIME 1.5f
 #define AUDIO_HOLD_TIME 10.0f
@@ -23,86 +23,15 @@ struct Generic
 	uint8_t selectedEffect = 0;
 	uint8_t selectedEffectSecondary = 0;
 	uint8_t numberOfEffects = 0;
-	//int visualizerFlags = 0;
 	uint8_t effectNames[MAX_NUMBER_EFFECTS] = { 0 };
-	uint8_t romVersion = 5;
+	uint8_t romVersion = 7;
 };
 Generic genericData;
-
-//uint8_t blinkSettings[] = {
-//	0xFF, 0, 0, // Color
-//	10, // Speed
-//	0, // Fade in
-//	1, // Fade out
-//	0, // Rainbow cycle
-//	10, // Rainbow cycle speed
-//};
-//uint8_t blinkSettingsDefaults[sizeof blinkSettings];
-//
-//uint8_t waveSettings[] = {
-//	0xFF, 0, 0, // Color 1
-//	0, 0xFF, 0, // Color 2
-//	0, 0, 0xFF, // Color 3
-//	1, // Number colors
-//
-//	10, // Speed
-//	2, // Width
-//	0, // Rainbow cycle
-//	10, // Rainbow cycle speed
-//};
-//uint8_t waveSettingsDefaults[sizeof waveSettings];
-//
-//uint8_t colorWheelSettings[] = {
-//	255, // Brightness
-//	10, // Speed
-//	10, // Width
-//};
-//uint8_t colorWheelSettingsDefaults[sizeof colorWheelSettings];
-//
-//uint8_t visualizerSettings[] = {
-//	0xFF, 0, 0, // Color 1
-//	0xFF, 0x80, 0, // Color 2
-//	255, // Brightness
-//	255, // Decay
-//	0, // Speed
-//	0, // Rainbow cycle
-//	10, // Rainbow cycle speed
-//};
-//uint8_t visualizerSettingsDefaults[sizeof visualizerSettings];
-//
-//uint8_t visorSettings[] = {
-//	0xFF, 0, 0, // Color 1
-//	0, 0xFF, 0, // Color 2
-//	1, // Number colors
-//	10, // Speed
-//	0, // Fade in
-//	1, // Fade out
-//	0, // Rainbow cycle
-//	10, // Rainbow cycle speed
-//};
-//uint8_t visorSettingsDefaults[sizeof visorSettings];
-//
-//uint8_t policeSettings[] = {
-//	0, 0, 0xFF, // Color 1
-//	0xFF, 0, 0, // Color 2
-//	10, // Speed
-//};
-//uint8_t policeSettingsDefaults[sizeof policeSettings];
-//
-//uint8_t christmasSettings[] = {
-//	0xFF, 0xFF, 0xFF, // Color 1
-//	0xFF, 0, 0, // Color 2
-//	0, 0xFF, 0, // Color 3
-//	10, // Speed
-//	64, // Decay
-//};
-//uint8_t christmasSettingsDefaults[sizeof christmasSettings];
 
 // Temp data
 namespace GizmoLED
 {
 	float audioData[NUM_AUDIO_POINTS] = { 0.0f };
-	//bool audioDecay[NUM_AUDIO_POINTS] = { false };
 	FnConnectionAnimation connectionAnimation = nullptr;
 }
 
@@ -114,11 +43,10 @@ uint8_t functionCallState[] =
 	// var args in characteristic
 };
 
-// GRB format
-//uint8_t *buffer;
-
 #define MAX_DEVICE_NAME 32
 #define EEP_DEVICE_NAME_OFFSET 1
+uint8_t userDeviceName[MAX_DEVICE_NAME] = { 0 };
+
 const char *defaultDeviceName = PROGMEM "Gizmo";
 
 // BLE
@@ -127,13 +55,6 @@ BLEService ledService(serviceID);
 BLEService ledServiceAD(serviceID);
 BLEService ledServiceADV(PROGMEM "e8942ca1-eef7-4a95-afeb-e3d07e8af52d");
 BLECharacteristic effectTypeCharacteristic(PROGMEM "e8942ca1-d9e7-4c45-b96c-10cf850bfb00", BLERead | BLEWrite, sizeof genericData);
-//BLECharacteristic blinkSettingsCharacteristic(PROGMEM "e8942ca1-d9e7-4c45-b96c-10cf850bfa01", BLERead | BLEWrite, sizeof blinkSettings);
-//BLECharacteristic waveSettingsCharacteristic(PROGMEM "e8942ca1-d9e7-4c45-b96c-10cf850bfa02", BLERead | BLEWrite, sizeof waveSettings);
-//BLECharacteristic colorWheelSettingsCharacteristic(PROGMEM "e8942ca1-d9e7-4c45-b96c-10cf850bfa03", BLERead | BLEWrite, sizeof colorWheelSettings);
-//BLECharacteristic visualizerSettingsCharacteristic(PROGMEM "e8942ca1-d9e7-4c45-b96c-10cf850bfa04", BLERead | BLEWrite, sizeof visualizerSettings);
-//BLECharacteristic visorSettingsCharacteristic(PROGMEM "e8942ca1-d9e7-4c45-b96c-10cf850bfa05", BLERead | BLEWrite, sizeof visorSettings);
-//BLECharacteristic policeSettingsCharacteristic(PROGMEM "e8942ca1-d9e7-4c45-b96c-10cf850bfa06", BLERead | BLEWrite, sizeof policeSettings);
-//BLECharacteristic christmasSettingsCharacteristic(PROGMEM "e8942ca1-d9e7-4c45-b96c-10cf850bfa07", BLERead | BLEWrite, sizeof christmasSettings);
 
 // Upstream BLE
 BLECharacteristic audioDataCharacteristic(PROGMEM "e8942ca1-d9e7-4c45-b96c-20cf850bfa00", BLEWrite | BLEWriteWithoutResponse, sizeof audioData);
@@ -143,74 +64,9 @@ BLECharacteristic fnCallCharacteristic(PROGMEM "e8942ca1-d9e7-4c45-b96c-20cf850b
 extEEPROM eep(kbits_256, 1, EEP_ROM_PAGE_SIZE);
 bool eepReady = false;
 
-#define EEP_INIT 0
 #define EEP_LOAD 1
 #define EEP_TEST 0
 #define EEP_SAVE_CHANGES 1
-#define VALIDATE_BLE_BUFFERS 0
-
-//struct Effect
-//{
-//	int flag;
-//	int eepOffset;
-//	BLECharacteristic characteristic;
-//	// animation func
-//	uint8_t settingsSize;
-//	uint8_t *settings;
-//	uint8_t *defaultSettings;
-//};
-
-//namespace Effects
-//{
-//	enum Effects
-//	{
-//		BLINK = 0,
-//		VISUALIZER,
-//	};
-//}
-
-//#define DECLARE_EFFECT(name, flag, eepOffset, uuid) \
-//	{(1 << flag), eepOffset, \
-//	BLECharacteristic(PROGMEM (uuid), BLERead | BLEWrite, sizeof name ## Settings), \
-//	sizeof name ## Settings, name ## Settings, nullptr}
-
-//Effect *effects = nullptr; // [] = {
-	//{(1 << 0), 1, sizeof blinkSettings, &blinkSettings, nullptr}
-	//DECLARE_EFFECT(blink, 0, 1, "e8942ca1-d9e7-4c45-b96c-10cf850bfa01"),
-//};
-//const int numEffects = sizeof effects / sizeof effects[0];
-
-//Effect tempEffect;
-//String tempEffectSettings;
-
-//namespace GizmoLED
-//{
-//	void BeginEffect(FnEffectAnimation fnEffectAnimation)
-//	{
-//		tempEffect.characteristic = BLECharacteristic();
-//		tempEffect.flag = 0;
-//		tempEffect.eepOffset = 0;
-//		tempEffect.settings = nullptr;
-//		tempEffect.defaultSettings = nullptr;
-//		tempEffectSettings = String();
-//	}
-//
-//	void AddEffectVarColor(VarName name, uint8_t r, uint8_t g, uint8_t b)
-//	{
-//	}
-//
-//	void AddEffectVarSlider(VarName name, uint8_t value, uint8_t min, uint8_t max)
-//	{
-//	}
-//
-//	void AddEffectVarCheckbox(VarName name, bool enabled)
-//	{
-//	}
-//
-//	void EndEffect()
-//	{
-//	}
-//}
 
 Effect *effects = nullptr;
 int numEffects = 0;
@@ -333,28 +189,31 @@ void RenameDevice(const uint8_t *args, int len)
 {
 	if (len < 1)
 	{
-		uint8_t noName = 0;
-		eep.write(EEP_ROM_PAGE_SIZE * EEP_DEVICE_NAME_OFFSET, (byte*)&noName, sizeof noName);
+		// Clear name from storage
+		uint8_t noName[MAX_DEVICE_NAME] = { 0 };
+		memcpy(userDeviceName, noName, sizeof userDeviceName);
 
 		BLE.setLocalName(defaultDeviceName);
 	}
 	else
 	{
-		uint8_t tmpName[MAX_DEVICE_NAME + 1] = { 0 };
-		memcpy(tmpName, args, len);
-		eep.write(EEP_ROM_PAGE_SIZE * EEP_DEVICE_NAME_OFFSET, (byte*)tmpName, len + 1);
+		len = min(MAX_DEVICE_NAME - 1, len);
+		memcpy(userDeviceName, args, len);
 
 		BLE.stopAdvertise();
-		BLE.setLocalName((const char*)tmpName);
+		BLE.setLocalName((const char*)userDeviceName);
 		BLE.advertise();
 	}
+
+	if (eepReady)
+		eep.write(EEP_ROM_PAGE_SIZE * EEP_DEVICE_NAME_OFFSET, (byte*)userDeviceName, sizeof userDeviceName);
 }
 
 //int lastAudioTime = 0;
 //int audioFrame = 0;
 void AudioDataChanged(BLEDevice device, BLECharacteristic characteristic)
 {
-	if (NUM_AUDIO_POINTS != characteristic.valueLength())
+	if (1 != characteristic.valueLength())
 	{
 		return;
 	}
@@ -365,11 +224,13 @@ void AudioDataChanged(BLEDevice device, BLECharacteristic characteristic)
 	//Serial.println("Audio lag: " + String(d) + ", frame: " + String(audioFrame));
 	//++audioFrame;
 
-	const uint8_t *value = characteristic.value();
+	//const uint8_t *value = characteristic.value();
+	const uint8_t d = *characteristic.value();
+
 	bool anyAudioReceived = false;
 	for (int i = 0; i < NUM_AUDIO_POINTS; ++i)
 	{
-		float nValue = value[i] / 255.0f;
+		float nValue = ((d >> i) & 0x1) ? 1.0f : 0.0f;
 		//if (nValue >= audioData[i])
 		//{
 		audioData[i] = nValue;
@@ -489,24 +350,57 @@ void UpdateBLE()
 
 	bleUpdateTimer = bleCurrentUpdateDelay;
 
+	//Serial.println(String("update ble " + String(millis())));
 	BLE.poll();
-	if (!central || !central.connected())
-	{
-		if (central)
-		{
-			central.disconnect();
-		}
 
-		central = BLE.central();
-		if (central && central.connected())
-		{
-			connectionEffectTimer = CONNECTION_FX_TIME;
+	//central = BLE.central();
+	//if (central)
+	//{
+	//	int rssi = central.rssi();
+	//	
+	//	Serial.println(String("rssi " + String(rssi)));
+	//	//if (rssi > 0 &&
+	//	//	rssi != 0)
+	//	//{
+	//	//	Serial.println(String("rssi dropped ") + String(rssi));
+	//	//	central.disconnect();
+	//	//}
+	//}
+	//if (!central || !central.connected())
+	//{
+	//	if (central)
+	//	{
+	//		central.disconnect();
+	//	}
 
-			// Reset function call trigger
-			functionCallState[0] = 0;
-		}
-	}
+	//	central = BLE.central();
+	//	if (central && central.connected())
+	//	{
+	//		//Serial.println("connected central: " + central.deviceName() + central.localName());
+	//		connectionEffectTimer = CONNECTION_FX_TIME;
+
+	//		// Reset function call trigger
+	//		functionCallState[0] = 0;
+	//	}
+	//}
 }
+
+void blePeripheralConnectedHandler(BLEDevice device)
+{
+	//Serial.print("Connected event, device: ");
+	//Serial.println(device.address());
+
+	//Serial.println("connected central: " + central.deviceName() + central.localName());
+	connectionEffectTimer = CONNECTION_FX_TIME;
+
+	// Reset function call trigger
+	functionCallState[0] = 0;
+}
+//
+//void blePeripheralDisconnectedHandler(BLEDevice device) {
+//	//Serial.print("Disconnected event, device: ");
+//	//Serial.println(device.address());
+//}
 
 void GizmoLEDSetup()
 {
@@ -519,14 +413,6 @@ void GizmoLEDSetup()
 		effect.defaultSettings = new uint8_t[effect.settingsSize];
 		copySmall(effect.defaultSettings, effect.settings, effect.settingsSize);
 	}
-
-	//copySmall(blinkSettingsDefaults, blinkSettings, sizeof blinkSettingsDefaults);
-	//copySmall(waveSettingsDefaults, waveSettings, sizeof waveSettingsDefaults);
-	//copySmall(colorWheelSettingsDefaults, colorWheelSettings, sizeof colorWheelSettingsDefaults);
-	//copySmall(visualizerSettingsDefaults, visualizerSettings, sizeof visualizerSettingsDefaults);
-	//copySmall(visorSettingsDefaults, visorSettings, sizeof visorSettingsDefaults);
-	//copySmall(policeSettingsDefaults, policeSettings, sizeof policeSettingsDefaults);
-	//copySmall(christmasSettingsDefaults, christmasSettings, sizeof christmasSettingsDefaults);
 
 	// BLE init
 	BLE.setConnectionInterval(0x0001, 0x0001);
@@ -562,11 +448,10 @@ void GizmoLEDSetup()
 			eep.read(EEP_ROM_PAGE_SIZE * effect.eepOffset, (byte*)effect.settings, effect.settingsSize);
 		}
 
-		uint8_t userName[MAX_DEVICE_NAME + 1] = { 0 };
-		eep.read(EEP_ROM_PAGE_SIZE * EEP_DEVICE_NAME_OFFSET, (byte*)&userName, MAX_DEVICE_NAME);
-		if (*userName != 0)
+		eep.read(EEP_ROM_PAGE_SIZE * EEP_DEVICE_NAME_OFFSET, (byte*)&userDeviceName, MAX_DEVICE_NAME - 1);
+		if (*userDeviceName != 0)
 		{
-			BLE.setLocalName((const char*)userName);
+			BLE.setLocalName((const char*)userDeviceName);
 		}
 #endif
 
@@ -636,7 +521,7 @@ void GizmoLEDSetup()
 	BLE.setAdvertisingInterval(320); // 160 == 100ms
 	BLE.advertise();
 
-	//BLE.setEventHandler(BLEConnected, blePeripheralConnectedHandler);
+	BLE.setEventHandler(BLEConnected, blePeripheralConnectedHandler);
 	//BLE.setEventHandler(BLEDisconnected, blePeripheralDisconnectedHandler);
 }
 
@@ -666,16 +551,6 @@ void GizmoLEDLoop()
 	}
 	delay(animationDelay);
 }
-
-//void blePeripheralConnectedHandler(BLEDevice device) {
-//	//Serial.print("Connected event, device: ");
-//	//Serial.println(device.address());
-//}
-//
-//void blePeripheralDisconnectedHandler(BLEDevice device) {
-//	//Serial.print("Disconnected event, device: ");
-//	//Serial.println(device.address());
-//}
 
 //void EffectSettingsChanged(uint8_t *settings, BLECharacteristic characteristic) {
 //	const uint8_t *value = characteristic.value();
