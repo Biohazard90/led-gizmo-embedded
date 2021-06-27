@@ -3,17 +3,19 @@
 
 #include "gizmoled.h"
 
-#include <Wire.h>
-#include <extEEPROM.h>
+#include "blesenseflash.h"
+
+//#include <Wire.h>
+//#include <extEEPROM.h>
 
 using namespace GizmoLED;
 
-#define LED_PIN 2
+//#define LED_PIN 2
+//#define NUM_LEDS 101
 
-#define NUM_LEDS 101
 #define BLE_DELAY 0.1f
 #define BLE_DELAY_VISUALIZER 0.0f
-#define EEP_ROM_PAGE_SIZE 64
+#define EEP_ROM_PAGE_SIZE 128
 #define CONNECTION_FX_TIME 1.5f
 #define AUDIO_HOLD_TIME 10.0f
 
@@ -24,9 +26,21 @@ struct Generic
 	uint8_t selectedEffectSecondary = 0;
 	uint8_t numberOfEffects = 0;
 	uint8_t effectNames[MAX_NUMBER_EFFECTS] = { 0 };
-	uint8_t romVersion = 7;
+	bool isInitialized = false;
 };
+
+#define MAX_DEVICE_NAME 32
+#define FLASH_DEVICE_NAME_OFFSET 1
+#define FLASH_EFFECT_BASE_OFFSET 2
+
 Generic genericData;
+char deviceName[MAX_DEVICE_NAME];
+
+constexpr int flashBlockSize = BLEFLASH_BLOCK_SIZE(EEP_ROM_PAGE_SIZE * (2 + MAX_NUMBER_EFFECTS));
+BLEFLASH_DECLARE_VARIABLE(flashAll, flashBlockSize) = {};
+BLEFLASH_DECLARE_ACCESS(uint8_t, flashGeneric, flashAll, 0);
+BLEFLASH_DECLARE_ACCESS(uint8_t, flashDeviceName, flashAll, FLASH_DEVICE_NAME_OFFSET * EEP_ROM_PAGE_SIZE);
+BLEFLASH_DECLARE_ACCESS(uint8_t, flashEffectBase, flashAll, FLASH_EFFECT_BASE_OFFSET * EEP_ROM_PAGE_SIZE);
 
 // Temp data
 namespace GizmoLED
@@ -43,10 +57,6 @@ uint8_t functionCallState[] =
 	// var args in characteristic
 };
 
-#define MAX_DEVICE_NAME 32
-#define EEP_DEVICE_NAME_OFFSET 1
-uint8_t userDeviceName[MAX_DEVICE_NAME] = { 0 };
-
 const char *defaultDeviceName = PROGMEM "Gizmo";
 
 // BLE
@@ -54,19 +64,19 @@ const char *serviceID = PROGMEM "e8942ca1-eef7-4a95-afeb-e3d07e8af52e";
 BLEService ledService(serviceID);
 BLEService ledServiceAD(serviceID);
 BLEService ledServiceADV(PROGMEM "e8942ca1-eef7-4a95-afeb-e3d07e8af52d");
-BLECharacteristic effectTypeCharacteristic(PROGMEM "e8942ca1-d9e7-4c45-b96c-10cf850bfb00", BLERead | BLEWrite, sizeof genericData);
+BLECharacteristic effectTypeCharacteristic(PROGMEM "e8942ca1-d9e7-4c45-b96c-10cf850bfb00", BLERead | BLEWrite, sizeof(struct Generic));
 
 // Upstream BLE
 BLECharacteristic audioDataCharacteristic(PROGMEM "e8942ca1-d9e7-4c45-b96c-20cf850bfa00", BLEWrite | BLEWriteWithoutResponse, sizeof audioData);
 BLECharacteristic fnCallCharacteristic(PROGMEM "e8942ca1-d9e7-4c45-b96c-20cf850bfa01", BLEWrite, sizeof functionCallState + MAX_FNCALL_ARGS);
 
 // EEP
-extEEPROM eep(kbits_256, 1, EEP_ROM_PAGE_SIZE);
-bool eepReady = false;
+//extEEPROM eep(kbits_256, 1, EEP_ROM_PAGE_SIZE);
+//bool eepReady = false;
 
-#define EEP_LOAD 1
+#define EEP_LOAD 0
 #define EEP_TEST 0
-#define EEP_SAVE_CHANGES 1
+#define EEP_SAVE_CHANGES 0
 
 Effect *effects = nullptr;
 int numEffects = 0;
@@ -79,12 +89,18 @@ float bleCurrentUpdateDelay = BLE_DELAY;
 
 float connectionEffectTimer = 0.0f;
 float lastAudioTime = 0.0f;
+float settingsDirtyTimer = 0.0f;
 
 BLEDevice central;
 
 void SetVisualizerInputSupported(bool isSupported)
 {
 	BLE.setAdvertisedService(isSupported ? ledServiceADV : ledServiceAD);
+}
+
+void MakeSettingsDirty()
+{
+	settingsDirtyTimer = 5.0f;
 }
 
 void EffectTypeChanged(BLEDevice device, BLECharacteristic characteristic)
@@ -114,6 +130,8 @@ void EffectTypeChanged(BLEDevice device, BLECharacteristic characteristic)
 #endif
 
 	bleCurrentUpdateDelay = (effect.type == EFFECTTYPE_VISUALIZER) ? BLE_DELAY_VISUALIZER : BLE_DELAY;
+	
+	MakeSettingsDirty();
 }
 
 void EffectSettingsChanged(BLEDevice device, BLECharacteristic characteristic)
@@ -157,14 +175,16 @@ void EffectSettingsChanged(BLEDevice device, BLECharacteristic characteristic)
 		effect->settings[i] = value[i];
 		//Serial.println("v: " + String(value[i]));
 	}
+	
+	MakeSettingsDirty();
 
-	if (EEP_SAVE_CHANGES == 1)
-	{
-		if (eepReady)
-		{
-			eep.write(EEP_ROM_PAGE_SIZE * effect->eepOffset, effect->settings, effect->settingsSize);
-		}
-	}
+	//if (EEP_SAVE_CHANGES == 1)
+	//{
+	//	if (eepReady)
+	//	{
+	//		eep.write(EEP_ROM_PAGE_SIZE * effect->eepOffset, effect->settings, effect->settingsSize);
+	//	}
+	//}
 }
 
 void copySmall(uint8_t *dst, uint8_t *src, int size)
@@ -191,22 +211,23 @@ void RenameDevice(const uint8_t *args, int len)
 	{
 		// Clear name from storage
 		uint8_t noName[MAX_DEVICE_NAME] = { 0 };
-		memcpy(userDeviceName, noName, sizeof userDeviceName);
+		memcpy(deviceName, noName, sizeof noName);
 
 		BLE.setLocalName(defaultDeviceName);
 	}
 	else
 	{
 		len = min(MAX_DEVICE_NAME - 1, len);
-		memcpy(userDeviceName, args, len);
+		memcpy(deviceName, args, len);
 
 		BLE.stopAdvertise();
-		BLE.setLocalName((const char*)userDeviceName);
+		BLE.setLocalName((const char*)deviceName);
 		BLE.advertise();
 	}
-
-	if (eepReady)
-		eep.write(EEP_ROM_PAGE_SIZE * EEP_DEVICE_NAME_OFFSET, (byte*)userDeviceName, sizeof userDeviceName);
+	
+	MakeSettingsDirty();
+	//if (eepReady)
+	//	eep.write(EEP_ROM_PAGE_SIZE * EEP_DEVICE_NAME_OFFSET, (byte*)userDeviceName, sizeof userDeviceName);
 }
 
 //int lastAudioTime = 0;
@@ -402,10 +423,36 @@ void blePeripheralConnectedHandler(BLEDevice device)
 //	//Serial.println(device.address());
 //}
 
+void StoreCurrentSettings()
+{
+	Serial.println("Flashing settings...");
+
+	uint8_t *data = (uint8_t*)malloc(flashBlockSize);
+
+	genericData.isInitialized = true;
+	copySmall(data, (uint8_t*)&genericData, sizeof(struct Generic));
+	copySmall(data + FLASH_DEVICE_NAME_OFFSET * EEP_ROM_PAGE_SIZE, (uint8_t*)deviceName, MAX_DEVICE_NAME);
+	for (int i = 0; i < numEffects; ++i)
+	{
+		Effect &effect = effects[i];
+		copySmall(data + (FLASH_EFFECT_BASE_OFFSET + i) * EEP_ROM_PAGE_SIZE, effect.settings, effect.settingsSize);
+	}
+	
+	BLEFLASH_WRITE(flashAll, flashBlockSize, data);
+
+	free(data);
+}
+
 void GizmoLEDSetup()
 {
 	//Serial.begin(115200);
 	//Serial.setTimeout(50);
+
+
+	// BLE init
+	BLE.setConnectionInterval(0x0001, 0x0001);
+	BLE.begin();
+	BLE.setLocalName(defaultDeviceName);
 
 	for (int i = 0; i < numEffects; ++i)
 	{
@@ -414,31 +461,53 @@ void GizmoLEDSetup()
 		copySmall(effect.defaultSettings, effect.settings, effect.settingsSize);
 	}
 
-	// BLE init
-	BLE.setConnectionInterval(0x0001, 0x0001);
-	BLE.begin();
-	BLE.setLocalName(defaultDeviceName);
+	// Flash init
+	if (((Generic*)flashGeneric)->isInitialized)
+	{
+		Serial.println("Init from flash");
+		
+		// Load all settings from flash memory
+		copySmall((uint8_t*)&genericData, flashGeneric, sizeof(struct Generic));
+		
+		if (*flashDeviceName != 0)
+		{
+			copySmall((uint8_t*)deviceName, flashDeviceName, MAX_DEVICE_NAME - 1);
+		}
+
+		// Load effect settings
+		for (int i = 0; i < numEffects; ++i)
+		{
+			Effect &effect = effects[i];
+			uint8_t *flashEffectSettings = flashEffectBase + EEP_ROM_PAGE_SIZE * i;
+			copySmall(effect.settings, flashEffectSettings, effect.settingsSize);
+		}
+	}
+	else
+	{
+		// If isInitialized isn't set, we need to initialize all settings based on their default settings because the flash is empty
+		Serial.println("Init defaults");
+	}
 
 	// EEP init
-	if (eep.begin(eep.twiClock400kHz) == 0)
+	//if (eep.begin(eep.twiClock400kHz) == 0)
 	{
-		eepReady = true;
+		//eepReady = true;
 
-		Generic tempGeneric;
-		eep.read(0, (byte*)&tempGeneric, sizeof tempGeneric);
-		if (tempGeneric.romVersion != genericData.romVersion)
-		{
-			// ROM mismatch, init all data
-			eep.write(0, (byte*)&genericData, sizeof genericData);
+		//Generic tempGeneric;
+		//eep.read(0, (byte*)&tempGeneric, sizeof tempGeneric);
+		//if (tempGeneric.romVersion != genericData.romVersion)
+		//{
+		//	// ROM mismatch, init all data
+		//	eep.write(0, (byte*)&genericData, sizeof genericData);
 
-			uint8_t noName = 0;
-			eep.write(EEP_ROM_PAGE_SIZE * 1, (byte*)&noName, sizeof noName);
-			for (int e = 0; e < numEffects; ++e)
-			{
-				Effect &effect = effects[e];
-				eep.write(EEP_ROM_PAGE_SIZE * effect.eepOffset, (byte*)effect.settings, effect.settingsSize);
-			}
-		}
+		//	uint8_t noName = 0;
+		//	eep.write(EEP_ROM_PAGE_SIZE * 1, (byte*)&noName, sizeof noName);
+		//	for (int e = 0; e < numEffects; ++e)
+		//	{
+		//		Effect &effect = effects[e];
+		//		eep.write(EEP_ROM_PAGE_SIZE * effect.eepOffset, (byte*)effect.settings, effect.settingsSize);
+		//	}
+		//}
 
 #if EEP_LOAD == 1
 		eep.read(0, (byte*)&genericData, sizeof genericData);
@@ -488,6 +557,8 @@ void GizmoLEDSetup()
 	//else {
 	//	Serial.println("eep err");
 	//}
+	
+	Serial.println("Num effects " + String(genericData.numberOfEffects) + ", update " + String(sizeof(struct Generic)));
 
 	for (int e = 0; e < numEffects; ++e)
 	{
@@ -503,7 +574,7 @@ void GizmoLEDSetup()
 	ledService.addCharacteristic(fnCallCharacteristic);
 
 	// Characteristics init
-	effectTypeCharacteristic.writeValue((byte*)&genericData, sizeof genericData);
+	effectTypeCharacteristic.writeValue((byte*)&genericData, sizeof(struct Generic));
 	fnCallCharacteristic.writeValue(functionCallState, sizeof functionCallState);
 
 	// Characteristics callbacks
@@ -539,6 +610,15 @@ void GizmoLEDLoop()
 	Animate();
 
 	UpdateBLE();
+	
+	if (settingsDirtyTimer > 0.0f)
+	{
+		settingsDirtyTimer -= frameTime;
+		if (settingsDirtyTimer <= 0.0f)
+		{
+			StoreCurrentSettings();
+		}
+	}
 
 	animationDelay = ANIMATION_DELAY - (millis() - animationDelay);
 	if (animationDelay < 0)
