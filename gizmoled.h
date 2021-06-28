@@ -20,6 +20,9 @@ enum EffectName
 	EFFECTNAME_PULSE,
 	EFFECTNAME_SPARKLE,
 	EFFECTNAME_CHRISTMAS,
+	EFFECTNAME_ACCELERATION,
+	EFFECTNAME_NOISELEVEL,
+	EFFECTNAME_EMPTY,
 };
 
 namespace GizmoLED
@@ -48,6 +51,7 @@ namespace GizmoLED
 		VARNAME_FADEIN,
 		VARNAME_FADEOUT,
 		VARNAME_ANGLE,
+		VARNAME_SENSITIVITY,
 	};
 
 	enum EffectType
@@ -64,6 +68,7 @@ namespace GizmoLED
 
 	typedef void(*FnEffectAnimation)(float frameTime);
 	typedef void(*FnConnectionAnimation)(float frameTime, float percent);
+	typedef void(*FnEffectChangedCallback)(int newEffectType, int lastEffectType);
 
 	struct Effect
 	{
@@ -80,6 +85,7 @@ namespace GizmoLED
 	};
 
 	extern GizmoLED::FnConnectionAnimation connectionAnimation;
+	extern GizmoLED::FnEffectChangedCallback effectChangedCallback;
 	extern float audioData[NUM_AUDIO_POINTS];
 	//extern bool *audioDecay;
 }

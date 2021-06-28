@@ -47,6 +47,7 @@ namespace GizmoLED
 {
 	float audioData[NUM_AUDIO_POINTS] = { 0.0f };
 	FnConnectionAnimation connectionAnimation = nullptr;
+	FnEffectChangedCallback effectChangedCallback = nullptr;
 }
 
 #define MAX_FNCALL_ARGS 32
@@ -57,7 +58,7 @@ uint8_t functionCallState[] =
 	// var args in characteristic
 };
 
-const char *defaultDeviceName = PROGMEM "Gizmo";
+const char *defaultDeviceName = PROGMEM "Collar";
 
 // BLE
 const char *serviceID = PROGMEM "e8942ca1-eef7-4a95-afeb-e3d07e8af52e";
@@ -109,6 +110,8 @@ void EffectTypeChanged(BLEDevice device, BLECharacteristic characteristic)
 	if (effectIndex >= numEffects) {
 		return;
 	}
+	
+	Effect &lastEffect = effects[genericData.selectedEffect];
 
 	genericData.selectedEffect = effectIndex;
 
@@ -132,6 +135,11 @@ void EffectTypeChanged(BLEDevice device, BLECharacteristic characteristic)
 	bleCurrentUpdateDelay = (effect.type == EFFECTTYPE_VISUALIZER) ? BLE_DELAY_VISUALIZER : BLE_DELAY;
 	
 	MakeSettingsDirty();
+	
+	if (effectChangedCallback != nullptr)
+	{
+		effectChangedCallback(effect.name, lastEffect.name);
+	}
 }
 
 void EffectSettingsChanged(BLEDevice device, BLECharacteristic characteristic)
@@ -219,6 +227,7 @@ void RenameDevice(const uint8_t *args, int len)
 	{
 		len = min(MAX_DEVICE_NAME - 1, len);
 		memcpy(deviceName, args, len);
+		deviceName[len] = 0;
 
 		BLE.stopAdvertise();
 		BLE.setLocalName((const char*)deviceName);
@@ -425,7 +434,7 @@ void blePeripheralConnectedHandler(BLEDevice device)
 
 void StoreCurrentSettings()
 {
-	Serial.println("Flashing settings...");
+	//Serial.println("Flashing settings...");
 
 	uint8_t *data = (uint8_t*)malloc(flashBlockSize);
 
@@ -464,7 +473,7 @@ void GizmoLEDSetup()
 	// Flash init
 	if (((Generic*)flashGeneric)->isInitialized)
 	{
-		Serial.println("Init from flash");
+		//Serial.println("Init from flash");
 		
 		// Load all settings from flash memory
 		copySmall((uint8_t*)&genericData, flashGeneric, sizeof(struct Generic));
@@ -481,11 +490,16 @@ void GizmoLEDSetup()
 			uint8_t *flashEffectSettings = flashEffectBase + EEP_ROM_PAGE_SIZE * i;
 			copySmall(effect.settings, flashEffectSettings, effect.settingsSize);
 		}
+		
+		if (*deviceName != 0)
+		{
+			BLE.setLocalName((const char*)deviceName);
+		}
 	}
 	else
 	{
 		// If isInitialized isn't set, we need to initialize all settings based on their default settings because the flash is empty
-		Serial.println("Init defaults");
+		//Serial.println("Init defaults");
 	}
 
 	// EEP init
@@ -558,7 +572,7 @@ void GizmoLEDSetup()
 	//	Serial.println("eep err");
 	//}
 	
-	Serial.println("Num effects " + String(genericData.numberOfEffects) + ", update " + String(sizeof(struct Generic)));
+	//Serial.println("Num effects " + String(genericData.numberOfEffects) + ", update " + String(sizeof(struct Generic)));
 
 	for (int e = 0; e < numEffects; ++e)
 	{
@@ -594,6 +608,11 @@ void GizmoLEDSetup()
 
 	BLE.setEventHandler(BLEConnected, blePeripheralConnectedHandler);
 	//BLE.setEventHandler(BLEDisconnected, blePeripheralDisconnectedHandler);
+	
+	if (effectChangedCallback != nullptr)
+	{
+		effectChangedCallback(effects[genericData.selectedEffect].name, -1);
+	}
 }
 
 void GizmoLEDLoop()
