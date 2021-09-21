@@ -58,7 +58,8 @@ uint8_t functionCallState[] =
 	// var args in characteristic
 };
 
-const char *defaultDeviceName = PROGMEM "Collar";
+extern const char *defaultDeviceName;
+//const char *defaultDeviceName = PROGMEM "Collar";
 
 // BLE
 const char *serviceID = PROGMEM "e8942ca1-eef7-4a95-afeb-e3d07e8af52e";
