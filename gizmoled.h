@@ -9,6 +9,14 @@
 #define NUM_AUDIO_POINTS 6
 #define ANIMATION_DELAY int(1000/60) // FPS
 
+#ifndef MAX
+#define MAX(x, y) ((x) >= (y) ? (x) : (y))
+#endif
+
+#ifndef MIN
+#define MIN(x, y) ((x) <= (y) ? (x) : (y))
+#endif
+
 enum EffectName
 {
 	EFFECTNAME_BLINK = 0,
@@ -28,6 +36,7 @@ enum EffectName
 	EFFECTNAME_METEOR,
 	EFFECTNAME_WIPE,
 	EFFECTNAME_FIRE,
+	EFFECTNAME_AMBIENT,
 };
 
 namespace GizmoLED
@@ -60,6 +69,9 @@ namespace GizmoLED
 		VARNAME_COLORBACKGROUND,
 		VARNAME_RAINBOWOFFSET,
 		VARNAME_BACKGROUNDBRIGHTNESS,
+		VARNAME_SPARKLE_BRIGHTNESS,
+		VARNAME_SPARKLE_AMOUNT,
+		VARNAME_SPARKLE_SPEED,
 	};
 
 	enum EffectType
@@ -176,3 +188,5 @@ namespace GizmoLED
 #define GIZMOLED_LOOP() \
 	extern void GizmoLEDLoop(); \
 	GizmoLEDLoop()
+
+extern void copySmall(uint8_t *dst, uint8_t *src, int size);
